@@ -1,9 +1,8 @@
-#pragma once
-
 #ifndef DEEPLOM_WINDOW_HPP
 #define DEEPLOM_WINDOW_HPP
 
 #include <string>
+#include <vector>
 
 struct GLFWwindow {};
 
@@ -23,7 +22,13 @@ namespace gorilla {
 
         bool shouldClose() const;
         void setShouldClose(bool value);
+
+        vk::raii::SurfaceKHR surface(const vk::raii::Instance& instance) const;
+
+        static void waitEvents();
         static void pollEvents();
+
+        static std::vector<const char *> requiredExtensions();
 
         std::string Name() const
         {
@@ -38,6 +43,13 @@ namespace gorilla {
         int Height() const
         {
             return wHeight;
+        }
+
+        vk::Extent2D framebufferSize() const
+        {
+            int w, h;
+            glfwGetFramebufferSize(wHandle, &w, &h);
+            return vk::Extent2D(w, h);
         }
 
     private:

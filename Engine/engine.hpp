@@ -1,11 +1,19 @@
-//
-// Created by Kiril on 22.09.2022.
-//
-
 #ifndef DEEPLOM_ENGINE_HPP
 #define DEEPLOM_ENGINE_HPP
 
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 #include <vulkan/vulkan_raii.hpp>
+#include <shaderc/shaderc.hpp>
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <3rdparty/stb_image.h>
+
+#include <chrono>
 
 namespace gorilla
 {
