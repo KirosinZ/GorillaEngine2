@@ -6,14 +6,14 @@ find_package(Vulkan REQUIRED)
 
 add_executable(Deeplom
         main.cpp
-        Geometry/raw_obj.cpp Geometry/raw_obj.h
+        Geometry/raw_obj.h
         Window/window.cpp Window/window.hpp
         Application/application.cpp Application/application.hpp
         Engine/engine.hpp
         Structures/Implementations/array_impl.hpp
         Structures/garray
         Misc/type_traits.hpp
-        Structures/common.hpp Misc/line.cpp Misc/line.h)
+        Structures/common.hpp Misc/line.h)
 
 include_directories(Deeplom
         Engine/..

@@ -11,9 +11,25 @@
 namespace fileutils
 {
 
-    class Line : std::string
+    struct Line
     {
-        friend std::istream& operator>>(std::istream& is, Line& line);
+        std::string str()
+        {
+            return _str;
+        };
+
+        std::string str() const
+        {
+            return _str;
+        };
+
+        friend std::istream& operator>>(std::istream& is, Line& line)
+        {
+            return std::getline(is, line._str);
+        };
+
+    private:
+        std::string _str;
     };
 
 } // fileutils
