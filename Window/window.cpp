@@ -7,43 +7,46 @@
 
 namespace gorilla {
 
-Window::Window(std::string name, int w, int h)
-:   wName(std::move(name)),
-    wWidth(w),
-    wHeight(h)
+window::window(
+		std::string name,
+		const int w,
+		const int h)
+: _name(std::move(name)),
+  _width(w),
+  _height(h)
 {
     init();
 }
 
-Window::~Window() noexcept
+window::~window() noexcept
 {
     destroy();
 }
 
-bool Window::shouldClose() const {
-    return glfwWindowShouldClose(wHandle);
+bool window::should_close() const {
+    return glfwWindowShouldClose(_handle);
 }
 
-void Window::setShouldClose(bool value) {
-    glfwSetWindowShouldClose(wHandle, value);
+void window::set_close(const bool value) {
+    glfwSetWindowShouldClose(_handle, value);
 }
 
-vk::raii::SurfaceKHR Window::surface(const vk::raii::Instance& instance) const
+vk::raii::SurfaceKHR window::surface(const vk::raii::Instance& instance) const
 {
     VkSurfaceKHR res;
-    if (glfwCreateWindowSurface(*instance, wHandle, nullptr, &res) != VK_SUCCESS)
+    if (glfwCreateWindowSurface(*instance, _handle, nullptr, &res) != VK_SUCCESS)
         throw std::runtime_error("Failed to create surface");
 
     return { instance, res };
 }
 
-void Window::init() {
+void window::init() {
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    wHandle = glfwCreateWindow(wWidth, wHeight, wName.c_str(), nullptr, nullptr);
-    if (wHandle == nullptr)
+    _handle = glfwCreateWindow(_width, _height, _name.c_str(), nullptr, nullptr);
+    if (_handle == nullptr)
     {
         const char* errMsg;
         glfwGetError(&errMsg);
@@ -53,25 +56,25 @@ void Window::init() {
     }
 }
 
-void Window::destroy() noexcept
+void window::destroy() noexcept
 {
-    glfwDestroyWindow(wHandle);
-    wHandle = nullptr;
+    glfwDestroyWindow(_handle);
+	_handle = nullptr;
 
     glfwTerminate();
 }
 
-void Window::waitEvents()
+void window::wait_events()
 {
     glfwWaitEvents();
 }
 
-void Window::pollEvents()
+void window::poll_events()
 {
     glfwPollEvents();
 }
 
-std::vector<const char *> Window::requiredExtensions()
+std::vector<const char *> window::extensions()
 {
     const char** exts;
     uint32_t cnt;

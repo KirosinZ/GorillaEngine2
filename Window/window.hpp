@@ -8,47 +8,50 @@ struct GLFWwindow {};
 
 namespace gorilla {
 
-    class Window {
+    class window {
     public:
-        Window(std::string name, int w, int h);
+        window(
+				std::string name,
+				const int w,
+				const int h);
 
-        Window(const Window& copy) = delete;
-        Window& operator=(const Window& other) = delete;
+        window(const window&) = delete;
+        window& operator=(const window&) = delete;
 
-        Window(Window&& other) = delete;
-        Window& operator=(Window&& other) = delete;
+        window(window&&) = delete;
+        window& operator=(window&&) = delete;
 
-        ~Window() noexcept;
+        ~window() noexcept;
 
-        bool shouldClose() const;
-        void setShouldClose(bool value);
+        bool should_close() const;
+        void set_close(const bool value);
 
         vk::raii::SurfaceKHR surface(const vk::raii::Instance& instance) const;
 
-        static void waitEvents();
-        static void pollEvents();
+        static void wait_events();
+        static void poll_events();
 
-        static std::vector<const char *> requiredExtensions();
+        static std::vector<const char *> extensions();
 
-        std::string Name() const
+        std::string name() const
         {
-            return wName;
+            return _name;
         }
 
-        int Width() const
+        int width() const
         {
-            return wWidth;
+            return _width;
         }
 
-        int Height() const
+        int height() const
         {
-            return wHeight;
+            return _height;
         }
 
-        vk::Extent2D framebufferSize() const
+        vk::Extent2D framebuffer_size() const
         {
             int w, h;
-            glfwGetFramebufferSize(wHandle, &w, &h);
+            glfwGetFramebufferSize(_handle, &w, &h);
             return vk::Extent2D(w, h);
         }
 
@@ -56,11 +59,11 @@ namespace gorilla {
         void init();
         void destroy() noexcept;
 
-        GLFWwindow* wHandle = nullptr;
+        GLFWwindow* _handle = nullptr;
 
-        std::string wName;
-        int wWidth = 0;
-        int wHeight = 0;
+        std::string _name;
+        int _width = 0;
+        int _height = 0;
     };
 
 } // gorilla

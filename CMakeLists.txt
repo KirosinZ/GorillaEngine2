@@ -4,20 +4,21 @@ project(Deeplom)
 set(CMAKE_CXX_STANDARD 17)
 find_package(Vulkan REQUIRED)
 
+
 add_executable(Deeplom
         main.cpp
         Geometry/raw_obj.h
         Window/window.cpp Window/window.hpp
         Application/application.cpp Application/application.hpp
         Engine/engine.hpp
-        Structures/Implementations/array_impl.hpp
-        Structures/garray
-        Misc/type_traits.hpp
-        Structures/common.hpp Misc/line.h)
+        Camera/camera.cpp Camera/camera.h)
+#        Shaders/compiler.cpp Shaders/compiler.h
+#        Shaders/compilation_options.h Shaders/compilation_options.cpp
+#        Shaders/compilation_result.tpp Shaders/compilation_result.h
+#        Shaders/enums.h)
 
 include_directories(Deeplom
-        Engine/..
-        Structures/)
+        Engine/..)
 
 target_link_libraries(Deeplom
         Vulkan::Vulkan
