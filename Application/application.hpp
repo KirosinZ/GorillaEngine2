@@ -50,9 +50,9 @@ class Application {
 		glm::mat4 proj;
 	};
 
-	//        const std::string modelPath = "../Geometry/room.obj";
+	//        const std::string modelPath = "../geometry/room.obj";
 	const std::string modelPath = "C:/Users/Kiril/Desktop/Всё/прочее/r3ds/JacketTransferExample/Jacket_01_Decimated_750k2.obj";
-	const std::string texturePath = "../Geometry/room.png";
+	const std::string texturePath = "../geometry/room.png";
 
 	std::vector<vertex> verts;
 	std::vector<uint32_t> indices;

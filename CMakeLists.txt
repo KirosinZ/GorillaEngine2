@@ -10,20 +10,20 @@ add_library(shaders STATIC
                 Shaders/compilation_result.tpp Shaders/compilation_result.h
                 Shaders/enums.h)
 
+
 target_link_libraries(shaders
         Vulkan::shaderc_combined)
 
 add_executable(Deeplom
         main.cpp
-        Geometry/raw_obj.h
         Window/window.cpp Window/window.hpp
         Application/application.cpp Application/application.hpp
         Engine/engine.hpp
-        Camera/camera.cpp Camera/camera.h)
+        Camera/camera.cpp Camera/camera.h geometry/geometry.cpp geometry/geometry.h)
 
 include_directories(Deeplom
-        Engine/..)
-
+        Engine/..
+        external/stb)
 
 target_link_libraries(Deeplom
         Vulkan::Vulkan
