@@ -3,10 +3,7 @@
 #include <Application/application.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <3rdparty/stb_image.h>
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <3rdparty/tiny_obj_loader.h>
+#include <stb_image.h>
 
 namespace gorilla
 {

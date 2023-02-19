@@ -10,6 +10,8 @@ add_library(shaders STATIC
                 Shaders/compilation_result.tpp Shaders/compilation_result.h
                 Shaders/enums.h)
 
+add_library(geom STATIC
+        geom/geom.cpp geom/geom.h)
 
 target_link_libraries(shaders
         Vulkan::shaderc_combined)
@@ -17,15 +19,17 @@ target_link_libraries(shaders
 add_executable(Deeplom
         main.cpp
         Window/window.cpp Window/window.hpp
-        Application/application.cpp Application/application.hpp
+#        Application/application.cpp Application/application.hpp
         Engine/engine.hpp
-        Camera/camera.cpp Camera/camera.h geometry/geometry.cpp geometry/geometry.h)
+        Camera/camera.cpp Camera/camera.h)
 
 include_directories(Deeplom
         Engine/..
-        external/stb)
+        external/stb
+        geom)
 
 target_link_libraries(Deeplom
         Vulkan::Vulkan
         glfw3.lib
-        shaders)
+        shaders
+        geom)

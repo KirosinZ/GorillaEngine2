@@ -3,9 +3,9 @@
 
 #include <Application/application.hpp>
 
+
 int main()
 {
-
 //    gorilla::Application* app = new MyApplication("Gorilla Application", 1920, 1080);
 	gorilla::Application* app = new gorilla::Application("Gorilla Application", 1920, 1080);
 
