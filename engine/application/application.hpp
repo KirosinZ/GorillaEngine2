@@ -10,9 +10,12 @@
 #include "misc/imguiobject.hpp"
 
 #include "mesh/mesh.hpp"
+#include "img/image.h"
 
 
 #include <engine/application/scene.h>
+
+#include <vk_utils/environment.hpp>
 
 namespace gorilla {
 
@@ -67,38 +70,18 @@ private:
 	float lasty = 0.0f;
 	bool first_mouse = true;
 
-
-	uint32_t instanceVersion;
-    std::vector<vk::LayerProperties> layerProperties;
-    std::vector<vk::ExtensionProperties> extensionProperties;
-
-    std::vector<vk::QueueFamilyProperties> queueFamilies;
-	std::vector<vk::LayerProperties> deviceLayerProperties;
-	std::vector<vk::ExtensionProperties> deviceExtensionProperties;
+	void initVulkan();
 
 	// Basic environment: graphics + present queues
-	vk::raii::Context context;
 	gorilla::glfw::window window;
-	vk::raii::Instance instance = nullptr;
-	vk::raii::SurfaceKHR surface = nullptr;
-	vk::raii::PhysicalDevice physDevice = nullptr;
-	vk::raii::Device device = nullptr;
+	vk_utils::environment environment;
 
-
-	std::vector<engine::scene::prop> props;
-
-	uint32_t graphicsQueueFamilyIndex = 0;
-	vk::raii::Queue graphicsQueue = nullptr;
-	uint32_t presentQueueFamilyIndex = 0;
-	vk::raii::Queue presentQueue = nullptr;
-
-	void initEnvironment(bool verbose = false);
-		void establishContext(bool verbose = false);
-		void createInstance(bool verbose = false);
-		void createSurface(bool verbose = false);
-		void createPhysDevice(bool verbose = false);
-		void createLogicalDevice(bool verbose = false);
-		void createQueue(bool verbose = false);
+	static vk_utils::environment initEnvironment(const glfw::window& window);
+		static vk::raii::Instance createInstance(const vk::raii::Context& context, const glfw::window& window);
+		static vk::raii::SurfaceKHR createSurface(const glfw::window& window, const vk::raii::Instance& instance);
+		static vk::raii::PhysicalDevice createPhysDevice(const vk::raii::Instance& instance, const vk::raii::SurfaceKHR& surface, int& graphicsFamily, int& presentFamily);
+		static vk::raii::Device createLogicalDevice(const vk::raii::PhysicalDevice& phys_device, int graphics_family, int present_family);
+		static vk::raii::Queue createQueue(const vk::raii::Device& device, int index);
 	//--
 
 	// Swapchain and images
@@ -111,8 +94,11 @@ private:
 	void initSwapchain(bool verbose = false);
 		void createSwapChain(bool verbose = false);
 		void createImageViews(bool verbose = false);
+
+	void recreateSwapChain(bool verbose = false);
 	//--
 
+	// Render State Declaration
     vk::raii::RenderPass renderPass = nullptr;
 	vk::raii::DescriptorSetLayout scenewise_descriptor_set_layout = nullptr;
 	vk::raii::DescriptorSetLayout objectwise_descriptor_set_layout = nullptr;
@@ -120,11 +106,15 @@ private:
     std::vector<vk::raii::Pipeline> pipelines;
     std::vector<vk::raii::Framebuffer> framebuffers;
     vk::raii::CommandPool commandPool = nullptr;
-//    vk::raii::Buffer vertexBuffer = nullptr;
-//    vk::raii::DeviceMemory vertexBufferMemory = nullptr;
-//    vk::raii::Buffer indexBuffer = nullptr;
-//    vk::raii::DeviceMemory indexBufferMemory = nullptr;
 
+	void createRenderPass(bool verbose = false);
+	void createDescriptorSetLayout(bool verbose = false);
+	void createGraphicsPipeline(bool verbose = false);
+	void createFramebuffers(bool verbose = false);
+	void createCommandPool(bool verbose = false);
+	//--
+
+	//-- Render State proper
 	vk::raii::Buffer view_projection_buffer = nullptr;
 	vk::raii::DeviceMemory view_projection_buffer_memory = nullptr;
 
@@ -139,20 +129,26 @@ private:
     std::vector<vk::raii::DescriptorSet> objectwise_descriptor_sets;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
 
-//    uint32_t mipLevels;
-//    vk::raii::Image texture = nullptr;
-//    vk::raii::DeviceMemory textureImageMemory = nullptr;
-//    vk::raii::ImageView textureView = nullptr;
-//    vk::raii::Sampler textureSampler = nullptr;
-
     vk::raii::Image depthImage = nullptr;
     vk::raii::DeviceMemory depthImageMemory = nullptr;
     vk::raii::ImageView depthImageView = nullptr;
 
-//	vk::raii::Image normalMap = nullptr;
-//	vk::raii::DeviceMemory normalMapMemory = nullptr;
-//	vk::raii::ImageView normalMapView = nullptr;
-//	vk::raii::Sampler normalMapSampler = nullptr;
+	void createUniformBuffers(bool verbose = false);
+	void createDepthResources(bool verbose = false);
+	void createTextureImage(const gorilla::asset::image& image, engine::texture& res, vk::Format format);
+	void createTextureImageView(engine::texture& res, vk::Format format);
+	void createTextureSampler(engine::texture& res);
+
+	void createCommandBuffers(bool verbose = false);
+	void createDescriptorPool(bool verbose = false);
+	void createDescriptorSets(bool verbose = false);
+	//--
+
+	std::vector<engine::scene::prop> props;
+
+	void loadModel(const std::string& name, engine::scene::prop& res, bool verbose = false);
+	void createVertexBuffers(engine::scene::prop& res, bool verbose = false);
+	void createIndexBuffers(engine::scene::prop& res, bool verbose = false);
 
     uint32_t currentFrame = 0;
 
@@ -160,82 +156,88 @@ private:
     std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
     std::vector<vk::raii::Fence> isFlightFences;
 
+	void createSyncObjects(bool verbose = false);
 
+
+	// imgui specifics
 	vk::raii::DescriptorPool ImguiDescriptorPool = nullptr;
 	std::unique_ptr<engine::misc::imgui_object> imgui;
 	bool isMenuShowing = false;
 	bool lockChange = false;
 
-    SwapChainSupportDetails querySupport(const vk::raii::PhysicalDevice& physicalDevice) const;
-    vk::raii::PhysicalDevice pickDevice(const std::vector<vk::raii::PhysicalDevice> &devices) const;
-    void pickBestFormat(const SwapChainSupportDetails& details, vk::Format& outFormat, vk::ColorSpaceKHR& outColorSpace) const;
-    vk::PresentModeKHR pickPresentMode(const SwapChainSupportDetails& details) const;
+	void createImguiDescriptorPool(bool verbose = false);
+	//--
+
+	void drawFrame();
+
+
+	static vk::raii::PhysicalDevice pickDevice(const std::vector<vk::raii::PhysicalDevice> &devices);
+
+	static SwapChainSupportDetails querySupport(const vk_utils::environment& environment);
+    static std::pair<vk::Format, vk::ColorSpaceKHR> pickBestFormat(const SwapChainSupportDetails& details);
+    static vk::PresentModeKHR pickPresentMode(const SwapChainSupportDetails& details);
+
+	static uint32_t findMemoryType(const vk_utils::environment& environment, uint32_t filter, vk::MemoryPropertyFlags properties);
+	static vk::Format findSupportedFormat(
+			const vk_utils::environment& environment,
+			const std::vector<vk::Format>& candidates,
+			vk::ImageTiling tiling,
+			vk::FormatFeatureFlags features);
+	static vk::Format findDepthFormat(const vk_utils::environment& environment);
+
+	static vk::raii::ShaderModule createShader(const vk_utils::environment& environment, const std::vector<uint32_t>& code);
+	static std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> createBuffer(const vk_utils::environment& environment, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
+	static std::pair<vk::raii::Image, vk::raii::DeviceMemory> createImage(
+			const vk_utils::environment& environment,
+			uint32_t width,
+			uint32_t height,
+			uint32_t  mipLevels,
+			vk::Format format,
+			vk::ImageTiling tiling,
+			vk::ImageUsageFlags usage,
+			vk::MemoryPropertyFlags properties);
+
+	static std::vector<char> readFile(const std::string& filename);
+
+	static vk::raii::CommandBuffer beginSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandPool& cmd_pool);
+	static void endSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandBuffer& buffer);
+
+	static void copyBuffer(
+			const vk_utils::environment& environment,
+			const vk::raii::CommandPool& cmd_pool,
+			const vk::raii::Buffer& srcBuffer,
+			const vk::raii::Buffer& dstBuffer,
+			vk::DeviceSize size);
+	static void copyBufferToImage(
+			const vk_utils::environment& environment,
+			const vk::raii::CommandPool& cmd_pool,
+			vk::Buffer buffer,
+			vk::Image image,
+			uint32_t width,
+			uint32_t height);
+
+	static void transitionImageLayout(
+			const vk_utils::environment& environment,
+			const vk::raii::CommandPool& cmd_pool,
+			vk::Image image,
+			vk::Format format,
+			vk::ImageLayout oldLayout,
+			vk::ImageLayout newLayout,
+			uint32_t mipLevels);
+	static void generateMipmaps(
+			const vk_utils::environment& environment,
+			const vk::raii::CommandPool& cmd_pool,
+			vk::Image img,
+			vk::Format imageFormat,
+			int32_t texW,
+			int32_t texH,
+			uint32_t mipLevels);
+
+	static bool hasStencilComponent(vk::Format format);
 
     void recordCommandBuffer(const vk::raii::CommandBuffer& buffer, uint32_t imgIndex) const;
 
-    uint32_t findMemoryType(uint32_t filter, vk::MemoryPropertyFlags properties) const;
-
-    static std::vector<char> readFile(const std::string& filename);
-
-    vk::raii::ShaderModule createShader(const std::vector<uint32_t>& code);
-
-    std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
-
-    void copyBuffer(const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, vk::DeviceSize size);
-
     void updateUniformBuffer(uint32_t currentImage);
-
-    std::pair<vk::raii::Image, vk::raii::DeviceMemory> createImage(uint32_t width, uint32_t height, uint32_t  mipLevels, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties);
-
-    vk::raii::CommandBuffer beginSingleTimeCommands();
-
-    void endSingleTimeCommands(vk::CommandBuffer buffer);
-
-    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t mipLevels);
-
-    void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
-
-    vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling  tiling, vk::FormatFeatureFlags features);
-
-    vk::Format findDepthFormat();
-
-    bool hasStencilComponent(vk::Format format);
-
-    void generateMipmaps(vk::Image img, vk::Format imageFormat, int32_t texW, int32_t texH, uint32_t mipLevels);
-
-    void initVulkan();
-
-
-    void createRenderPass(bool verbose = false);
-    void createDescriptorSetLayout(bool verbose = false);
-    void createGraphicsPipeline(bool verbose = false);
-    void createFramebuffers(bool verbose = false);
-    void createCommandPool(bool verbose = false);
-    void createDepthResources(bool verbose = false);
-    void createTextureImage(const std::string& name, engine::scene::prop& res, bool verbose = false);
-    void createTextureImageView(engine::scene::prop& res, bool verbose = false);
-    void createTextureSampler(engine::scene::prop& res, bool verbose = false);
-	void createNormalImage(const std::string& name, engine::scene::prop& res, bool verbose = false);
-	void createNormalImageView(engine::scene::prop& res, bool verbose = false);
-	void createNormalSampler(engine::scene::prop& res, bool verbose = false);
-	void createRoughnessImage(const std::string& name, engine::scene::prop& res, bool verbose = false);
-	void createRoughnessImageView(engine::scene::prop& res, bool verbose = false);
-	void createRoughnessSampler(engine::scene::prop& res, bool verbose = false);
-    void loadModel(const std::string& name, engine::scene::prop& res, bool verbose = false);
-    void createVertexBuffers(engine::scene::prop& res, bool verbose = false);
-    void createIndexBuffers(engine::scene::prop& res, bool verbose = false);
-    void createUniformBuffers(bool verbose = false);
-    void createCommandBuffers(bool verbose = false);
-    void createDescriptorPool(bool verbose = false);
-    void createDescriptorSets(bool verbose = false);
-    void createSyncObjects(bool verbose = false);
-
-    void recreateSwapChain(bool verbose = false);
-
-    void drawFrame();
-
-
-	void createImguiDescriptorPool(bool verbose = false);
 };
 
 } // gorilla

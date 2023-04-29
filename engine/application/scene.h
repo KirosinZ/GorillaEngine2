@@ -10,6 +10,7 @@
 #include <engine/application/geombuffer.h>
 
 #include <engine/mesh/light.hpp>
+#include <asset_loader/img/image.h>
 
 namespace gorilla::engine
 {
@@ -19,9 +20,11 @@ struct scene
 	struct prop_description
 	{
 		std::string obj_filename;
-		std::string texture_filename;
-		std::string normal_filename;
-		std::string roughness_filename;
+		asset::image texture;
+		asset::image normal;
+		asset::image roughness;
+		asset::image metallic;
+		asset::image ambient_occlusion;
 
 		glm::mat4 model = glm::mat4(1.0f);
 	};
@@ -33,6 +36,8 @@ struct scene
 		engine::texture texture;
 		engine::texture normal;
 		engine::texture roughness;
+		engine::texture metallic;
+		engine::texture ambient_occlusion;
 
 		glm::mat4 model = glm::mat4(1.0f);
 	};

@@ -42,32 +42,32 @@ public:
 	inline wireframe_t& wireframe() { return _wireframe; }
 
 	inline bool has_texture() const { return _texture != nullptr; }
-	inline const img::image& texture() const
+	inline const asset::image& texture() const
 	{
 		if (_texture == nullptr)
 			throw std::runtime_error("texture is not present");
 
 		return *_texture;
 	}
-	inline void set_texture(img::image& texture) { _texture = &texture; }
+	inline void set_texture(asset::image& texture) { _texture = &texture; }
 
 	inline bool has_normal_map() const { return _normal_map != nullptr; }
-	inline const img::image& normal_map() const
+	inline const asset::image& normal_map() const
 	{
 		if (_normal_map == nullptr)
 			throw std::runtime_error("normal map is not present");
 
 		return *_normal_map;
 	}
-	inline void set_normal_map(img::image& normal_map) { _normal_map = &normal_map; }
+	inline void set_normal_map(asset::image& normal_map) { _normal_map = &normal_map; }
 private:
 	mesh_t _mesh;
 	glm::mat4 _model = glm::mat4(1.0f);
 
 	wireframe_t _wireframe{};
 
-	img::image* _texture = nullptr;
-	img::image* _normal_map = nullptr;
+	asset::image* _texture = nullptr;
+	asset::image* _normal_map = nullptr;
 	vk::raii::Pipeline* _pipeline = nullptr;
 };
 

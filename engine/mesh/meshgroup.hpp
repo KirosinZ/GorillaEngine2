@@ -15,12 +15,12 @@ namespace gorilla::engine
 class scene1
 {
 public:
-	inline const std::vector<img::image>& images() const { return _images; }
-	inline std::vector<img::image>& images() { return _images; }
+	inline const std::vector<asset::image>& images() const { return _images; }
+	inline std::vector<asset::image>& images() { return _images; }
 
 	inline const std::vector<vk::raii::Pipeline>& pipelines() const { return _pipelines; }
 private:
-	std::vector<img::image> _images;
+	std::vector<asset::image> _images;
 	std::vector<vk::raii::Pipeline> _pipelines;
 
 	std::vector<renderable_unit> _units;

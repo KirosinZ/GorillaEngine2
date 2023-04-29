@@ -11,6 +11,9 @@
 #include <asset_loader/triangulated_mesh/triangulatedmesh.h>
 #include <asset_loader/wireframe/wireframe.h>
 
+#include <vk_utils/environment.hpp>
+#include <vk_helpers/helpers.hpp>
+
 std::vector<uint32_t> check_shader(const gorilla::shader_compiler::compiler::result_spirv_code& result)
 {
 	if (result.n_errors() > 0)
@@ -37,10 +40,15 @@ int main()
 	gorilla::engine::scene s;
 	s.props.push_back({});
 	s.props.back().obj_filename = "../Resources/Models/melon.obj";
-	s.props.back().texture_filename = "../Resources/Textures/melon.png";
-	s.props.back().normal_filename = "../Resources/Textures/melon_normal.png";
-	s.props.back().roughness_filename = "../Resources/Textures/melon_roughness.png";
-	s.props.back().model = glm::mat4(1.0f);
+	s.props.back().texture = gorilla::asset::image::load_image("../Resources/Textures/Metallic/roof_albedo.png");
+	s.props.back().normal = gorilla::asset::image::load_image("../Resources/Textures/Metallic/roof_normal.png");
+	s.props.back().roughness = gorilla::asset::image::load_image("../Resources/Textures/Metallic/roof_roughness.png");
+	s.props.back().metallic = gorilla::asset::image::load_image("../Resources/Textures/Metallic/roof_metallic.png");
+	s.props.back().ambient_occlusion = gorilla::asset::image::load_image("../Resources/Textures/Metallic/roof_ao.png");
+//	s.props.back().texture_filename = "../Resources/Textures/melon.png";
+//	s.props.back().normal_filename = "../Resources/Textures/melon_normal.png";
+//	s.props.back().roughness_filename = "../Resources/Textures/melon_roughness.png";
+	s.props.back().model = glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
 
 //	s.props.push_back({});
 //	s.props.back().obj_filename = "../Resources/Models/room.obj";
@@ -49,7 +57,7 @@ int main()
 
 	s.lights.point_lights.n_lights = 1;
 	auto& point_light = s.lights.point_lights.lights[0];
-	point_light.position = glm::vec4(-3.0f, 0.0f, -5.0f, 0.0f);
+	point_light.position = glm::vec4(-3.0f, 0.0f, 5.0f, 0.0f);
 	point_light.color = glm::vec4(100.0f, 100.0f, 100.0f, 1.0f);
 	point_light.constant = 1.0f;
 	point_light.linear = 0.0f;
@@ -59,7 +67,7 @@ int main()
 	auto& spot_light = s.lights.spot_lights.lights[0];
 	spot_light.position = glm::vec3(0.0f, 0.0f, -5.0f);
 	spot_light.direction = glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f));
-	spot_light.color = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	spot_light.color = glm::vec4(10.0f, 10.0f, 10.0f, 1.0f);
 	spot_light.cone_size = 0.95f;
 	spot_light.constant = 1.0f;
 	spot_light.linear = 0.2f;
@@ -68,7 +76,7 @@ int main()
 	auto& spot_light1 = s.lights.spot_lights.lights[1];
 	spot_light1.position = glm::vec3(5.0f, 5.0f, -5.0f);
 	spot_light1.direction = glm::normalize(glm::vec3(-1.0f, -1.0f, 2.0f));
-	spot_light1.color = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+	spot_light1.color = glm::vec4(10.0f, 10.0f, 10.0f, 0.0f);
 	spot_light1.cone_size = 0.95f;
 	spot_light1.constant = 1.0f;
 	spot_light1.linear = 0.0f;

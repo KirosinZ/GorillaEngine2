@@ -8,7 +8,7 @@
 #include <vector>
 #include <string>
 
-namespace gorilla::img
+namespace gorilla::asset
 {
 
 class image
@@ -41,6 +41,6 @@ static_assert(std::is_nothrow_destructible_v<image>);
 
 static_assert(std::is_nothrow_swappable_v<image>);
 
-} // gorilla::img
+} // gorilla::asset
 
 #endif //DEEPLOM_IMAGE_H

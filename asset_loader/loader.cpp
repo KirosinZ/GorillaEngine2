@@ -24,14 +24,14 @@ std::vector<geom::obj> load_meshes(const std::vector<std::string>& filenames)
 	return meshes;
 }
 
-img::image load_image(const std::string& filename)
+asset::image load_image(const std::string& filename)
 {
-	return img::image::load_image(filename);
+	return asset::image::load_image(filename);
 }
 
-std::vector<img::image> load_images(const std::vector<std::string>& filenames)
+std::vector<asset::image> load_images(const std::vector<std::string>& filenames)
 {
-	std::vector<img::image> images;
+	std::vector<asset::image> images;
 
 	for (const std::string& filename : filenames)
 		images.emplace_back(load_image(filename));

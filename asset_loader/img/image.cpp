@@ -8,7 +8,7 @@
 
 #include "stb/stb_image.h"
 
-namespace gorilla::img
+namespace gorilla::asset
 {
 
 image image::load_image(const std::string& filename)
@@ -18,7 +18,7 @@ image image::load_image(const std::string& filename)
 	if (bytes == nullptr)
 		throw std::runtime_error(stbi_failure_reason());
 
-	res._bytes = std::vector<uint8_t>(bytes, bytes + res._height * res._width * res._channels);
+	res._bytes = std::vector<uint8_t>(bytes, bytes + res._height * res._width * 4);
 	stbi_image_free(bytes);
 
 	return res;

@@ -2,7 +2,7 @@
 // Created by Kiril on 12.04.2023.
 //
 
-#ifndef DEEPLOM_TEXTURE_H
+#ifndef DEEPLOM_TEXTURE_HPP
 #define DEEPLOM_TEXTURE_H
 
 #include <vulkan/vulkan_raii.hpp>
@@ -21,4 +21,4 @@ struct texture
 
 } // gorilla::engine
 
-#endif //DEEPLOM_TEXTURE_H
+#endif //DEEPLOM_TEXTURE_HPP

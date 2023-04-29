@@ -1,4 +1,4 @@
-#version 460
+#version 460 core
 
 float PI = 3.1415926535;
 
@@ -45,6 +45,8 @@ layout(set = 0, binding = 2) uniform spot
 layout(set = 1, binding = 1) uniform sampler2D albedoMap;
 layout(set = 1, binding = 2) uniform sampler2D normalMap;
 layout(set = 1, binding = 3) uniform sampler2D roughnessMap;
+layout(set = 1, binding = 4) uniform sampler2D metallicMap;
+layout(set = 1, binding = 5) uniform sampler2D aoMap;
 
 vec3 attenuate_point_light(point_light_t light, float dist)
 {
@@ -111,9 +113,14 @@ void main()
     vec3 actual_normal = normalize(matrix * (sampled_normal * 2.0 - 1.0));
     vec4 albedo = texture(albedoMap, fragTexCoord);
     float roughness = texture(roughnessMap, fragTexCoord).r;
+    float metallic = texture(metallicMap, fragTexCoord).r;
+    float ao = texture(aoMap, fragTexCoord).r;
 
     vec3 N = normalize(actual_normal);
     vec3 V = normalize(camPos - fragPos);
+
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedo.xyz, vec3(metallic));
 
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < point_lights.n_lights; i++)
@@ -123,10 +130,9 @@ void main()
         vec3 H = normalize(V + L);
 
         float distance = length(light.position.xyz - fragPos);
-        float attenuation = 1.0 / (distance * distance);
+        float attenuation = 1.0 / (distance);
         vec3 radiance = light.color.xyz * attenuation;
 
-        vec3 F0 = vec3(0.04);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
         float NDF = DistributionGGX(N, H, roughness);
@@ -138,6 +144,7 @@ void main()
 
         vec3 kS = F;
         vec3 kD = 1.0 - kS;
+        kD *= (1.0 - metallic);
 
         float NdotL = max(dot(N, L), 0.0);
 
@@ -151,14 +158,14 @@ void main()
         vec3 H = normalize(V + L);
 
         float DdotL = dot(-L, normalize(light.direction.xyz));
-        if (DdotL < light.cone_size)
+        if (DdotL < light.cone_size - 0.05)
                 continue;
 
         float distance = length(light.position.xyz - fragPos);
-        float attenuation = 1.0 / (distance * distance);
-        vec3 radiance = light.color.xyz * attenuation;
+        float attenuation = 1.0 / (distance);
+        float falloff = smoothstep(light.cone_size - 0.05, light.cone_size, DdotL);
+        vec3 radiance = light.color.xyz * attenuation * falloff;
 
-        vec3 F0 = vec3(0.04);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
         float NDF = DistributionGGX(N, H, roughness);
@@ -170,17 +177,18 @@ void main()
 
         vec3 kS = F;
         vec3 kD = 1.0 - kS;
+        kD *= (1.0 - metallic);
 
         float NdotL = max(dot(N, L), 0.0);
 
         Lo += (kD * albedo.xyz / PI + specular) * radiance * NdotL;
     }
 
-    vec3 ambient = vec3(0.03) * albedo.xyz;
+    vec3 ambient = vec3(0.003) * albedo.xyz * ao;
     vec3 color = ambient + Lo;
 
     color = color / (1.0 + color);
-//    color = pow(color, vec3(1.0 / 2.2));
+    color = pow(color, vec3(1.0 / 2.2));
     outColor = vec4(color, 1.0);
 
 }
