@@ -1,14 +1,9 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
-#ifndef DEEPLOM_IMAGE_HELPERS_HPP
-#define DEEPLOM_IMAGE_HELPERS_HPP
+#pragma once
 
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_utils/environment.hpp>
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 std::pair<vk::raii::Image, vk::raii::DeviceMemory> image(
@@ -46,5 +41,3 @@ void generate_mipmaps(
 		uint32_t mip_levels);
 
 }
-
-#endif //DEEPLOM_IMAGE_HELPERS_HPP

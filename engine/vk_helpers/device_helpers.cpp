@@ -1,22 +1,8 @@
-//
-// Created by Kiril on 25.04.2023.
-//
-
 #include "device_helpers.hpp"
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
-
-vk::DeviceQueueCreateInfo queue_create_info(int32_t index, const std::vector<float>& priorities)
-{
-	vk::DeviceQueueCreateInfo res(
-			{},
-			index,
-			priorities);
-
-	return res;
-}
 
 vk::raii::Device device(
 		const vk::raii::PhysicalDevice& phys_device,
@@ -34,4 +20,4 @@ vk::raii::Device device(
 	return phys_device.createDevice(create_info);
 }
 
-} // vk_helpers
+}

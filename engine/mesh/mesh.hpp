@@ -10,6 +10,9 @@
 #include <vector>
 
 #include <vulkan/vulkan_raii.hpp>
+#include <set>
+#include "obj/obj.h"
+
 
 namespace gorilla
 {
@@ -26,6 +29,9 @@ struct mesh
 
 	std::vector<vertex> vertices;
 	std::vector<uint32_t> indices;
+
+	static mesh from_obj(const asset::obj& obj);
+	static void calculate_tangent_space(mesh& mesh);
 };
 
 template <typename T>
@@ -57,7 +63,54 @@ inline std::vector<vk::VertexInputAttributeDescription> vk_vertex_input_attribut
 	return res;
 }
 
-inline void calculate_tangent_space(mesh& mesh)
+inline mesh mesh::from_obj(const asset::obj& obj)
+{
+	const asset::obj& tri_obj = obj.is_triangulated() ? obj : asset::triangulate_obj(obj);
+
+	mesh res{};
+
+	std::map<std::pair<int32_t, int32_t>, int32_t> vertices;
+
+	std::vector<std::set<int>> vertex_to_triangle(tri_obj.n_vertices());
+
+	for (const asset::obj::index_triplet& t : tri_obj.face_indices())
+	{
+		std::pair<int32_t, int32_t> key = { t.vi, t.vti };
+
+		const auto& thing = vertices.find(key);
+
+		if (thing == vertices.end())
+		{
+			mesh::vertex v{};
+			v.position = tri_obj.vertices()[t.vi];
+			v.texcoord = tri_obj.texcoords()[t.vti];
+			v.normal = tri_obj.normals()[t.vni];
+//			v.texcoord.y = 1.0f - v.texcoord.y;
+
+			vertices.insert_or_assign(key, res.vertices.size());
+			res.vertices.push_back(v);
+		}
+		res.indices.push_back(vertices.at(key));
+		vertex_to_triangle[t.vi].insert(vertices.at(key));
+	}
+
+	std::vector<std::vector<int>> triangle_to_vertex(obj.n_face_indices());
+	for (int i = 0; i < vertex_to_triangle.size(); i++)
+	{
+		for (auto iter = vertex_to_triangle[i].begin(); iter != vertex_to_triangle[i].end(); iter++)
+		{
+			for (auto inter = vertex_to_triangle[i].begin(); inter != vertex_to_triangle[i].end(); inter++)
+			{
+				triangle_to_vertex[*iter].push_back(*inter);
+			}
+		}
+	}
+	calculate_tangent_space(res);
+
+	return res;
+}
+
+inline void mesh::calculate_tangent_space(mesh& mesh)
 {
 	const int n_triangles = mesh.indices.size() / 3;
 	const int n_vertices = mesh.vertices.size();
@@ -87,9 +140,9 @@ inline void calculate_tangent_space(mesh& mesh)
 
 		const glm::vec3 n = glm::cross(q1, q2);
 		float w = glm::length(n);
-		/*v0.normal += n;*/ w0 += w;
-		/*v1.normal += n;*/ w1 += w;
-		/*v2.normal += n;*/ w2 += w;
+		v0.normal += n; w0 += w;
+		v1.normal += n; w1 += w;
+		v2.normal += n; w2 += w;
 
 		const glm::vec2 uv1 = v1.texcoord - v0.texcoord;
 		const glm::vec2 uv2 = v2.texcoord - v0.texcoord;
@@ -113,7 +166,7 @@ inline void calculate_tangent_space(mesh& mesh)
 		glm::vec3& t = tangents[i];
 		glm::vec3& b = bitangents[i];
 
-//		v.normal /= weights[i];
+		v.normal /= weights[i];
 		t /= weights[i];
 		b /= weights[i];
 

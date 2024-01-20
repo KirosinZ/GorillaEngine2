@@ -5,11 +5,10 @@
 #ifndef DEEPLOM_HELPERS_HPP
 #define DEEPLOM_HELPERS_HPP
 
+#include "queue_helpers.hpp"
 #include "instance_helpers.hpp"
 #include "physical_device_helpers.hpp"
 #include "device_helpers.hpp"
-
-//#include "swapchain_helpers.hpp"
 
 #include "buffer_helpers.hpp"
 #include "image_helpers.hpp"
@@ -20,6 +19,6 @@
 
 #include "texture_helpers.hpp"
 
-namespace vkh = vk_helpers;
+namespace vkh = gorilla::vk_helpers;
 
 #endif //DEEPLOM_HELPERS_HPP

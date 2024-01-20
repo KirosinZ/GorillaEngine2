@@ -1,13 +1,9 @@
-//
-// Created by Kiril on 24.04.2023.
-//
-
 #include "instance_helpers.hpp"
 
 #include <vk_utils/environment.hpp>
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk::ApplicationInfo application_info(
@@ -37,9 +33,8 @@ vk::raii::Instance instance(
 			&app_info,
 			layers,
 			extensions);
-	const auto& context = vk_utils::environment::context();
 
-	return context.createInstance(create_info);
+	return vk::raii::Context{}.createInstance(create_info);
 }
 
 vk::raii::Instance instance(
@@ -53,4 +48,4 @@ vk::raii::Instance instance(
 	return instance(app_info, layers, extensions);
 }
 
-} // vk_helpers
+}

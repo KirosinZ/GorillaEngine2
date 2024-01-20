@@ -4,8 +4,9 @@ float PI = 3.1415926535;
 
 struct point_light_t
 {
-    vec4 position;
-    vec4 color;
+    vec3 position;
+    vec3 color;
+    float intensity;
     float constant;
     float linear;
     float quadratic;
@@ -15,7 +16,8 @@ struct spot_light_t
 {
     vec3 position;
     vec3 direction;
-    vec4 color;
+    float intensity;
+    vec3 color;
     float cone_size;
 
     float constant;
@@ -48,16 +50,14 @@ layout(set = 1, binding = 3) uniform sampler2D roughnessMap;
 layout(set = 1, binding = 4) uniform sampler2D metallicMap;
 layout(set = 1, binding = 5) uniform sampler2D aoMap;
 
-vec3 attenuate_point_light(point_light_t light, float dist)
+float attenuate_point_light(point_light_t light, float dist)
 {
-    float k = 1.0 / (light.constant + dist * light.linear + dist * dist * light.quadratic);
-    return k * light.color.xyz;
+    return 1.0 / (light.constant + dist * light.linear + dist * dist * light.quadratic);
 }
 
-vec3 attenuate_spot_light(spot_light_t light, float dist)
+float attenuate_spot_light(spot_light_t light, float dist)
 {
-    float k = 1.0 / (light.constant + dist * light.linear + dist * dist * light.quadratic);
-    return k * light.color.xyz;
+    return 1.0 / (light.constant + dist * light.linear + dist * dist * light.quadratic);
 }
 
 vec3 fresnelSchlick(float cosTheta, vec3 F0)
@@ -102,6 +102,26 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 
 void main()
 {
+//    vec4 albedo = texture(albedoMap, fragTexCoord);
+//    outColor = albedo;
+//
+//    vec3 N = normalize(fragTangentMatrix[2]);
+//    vec3 V = normalize(camPos - fragPos);
+//
+//    point_light_t light = point_lights.lights[0];
+//
+//    vec3 L = normalize(light.position - fragPos);
+//
+//    vec3 R = reflect(-L, N);
+//
+//    float Aq = 0.01;
+//    float Dq = max(0.0, dot(L, N));
+//    float Sq = pow(max(0.0, dot(R, V)), 12.0);
+//
+//    outColor = vec4(vec3(Aq + Dq / 2.0 + Sq) * albedo.xyz * light.intensity, 1.0);
+//
+//    return;
+
     vec3 tangent = fragTangentMatrix[0];
     vec3 bitangent = fragTangentMatrix[1];
     vec3 normal = fragTangentMatrix[2];
@@ -119,6 +139,12 @@ void main()
     vec3 N = normalize(actual_normal);
     vec3 V = normalize(camPos - fragPos);
 
+    vec3 col = vec3(0.6, 0.6, 0.6);
+    float g = max(0.0, dot(N, V));
+
+    outColor = vec4(g * col, 1.0);
+
+
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo.xyz, vec3(metallic));
 
@@ -126,12 +152,12 @@ void main()
     for (int i = 0; i < point_lights.n_lights; i++)
     {
         point_light_t light = point_lights.lights[i];
-        vec3 L = normalize(light.position.xyz - fragPos);
+        vec3 L = normalize(light.position - fragPos);
         vec3 H = normalize(V + L);
 
-        float distance = length(light.position.xyz - fragPos);
-        float attenuation = 1.0 / (distance);
-        vec3 radiance = light.color.xyz * attenuation;
+        float distance = length(light.position - fragPos);
+        float attenuation = attenuate_point_light(light, distance);
+        vec3 radiance = light.intensity * light.color * attenuation;
 
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
@@ -154,17 +180,17 @@ void main()
     for (int i = 0; i < spot_lights.n_lights; i++)
     {
         spot_light_t light = spot_lights.lights[i];
-        vec3 L = normalize(light.position.xyz - fragPos);
+        vec3 L = normalize(light.position - fragPos);
         vec3 H = normalize(V + L);
 
-        float DdotL = dot(-L, normalize(light.direction.xyz));
+        float DdotL = dot(-L, normalize(light.direction));
         if (DdotL < light.cone_size - 0.05)
                 continue;
 
-        float distance = length(light.position.xyz - fragPos);
-        float attenuation = 1.0 / (distance);
+        float distance = length(light.position - fragPos);
+        float attenuation = attenuate_spot_light(light, distance);
         float falloff = smoothstep(light.cone_size - 0.05, light.cone_size, DdotL);
-        vec3 radiance = light.color.xyz * attenuation * falloff;
+        vec3 radiance = light.intensity * light.color * attenuation * falloff;
 
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
 

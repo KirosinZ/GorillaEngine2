@@ -1,11 +1,7 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
 #include "buffer_helpers.hpp"
 #include "command_helpers.hpp"
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> buffer(
@@ -113,7 +109,3 @@ uint32_t memory_type(
 }
 
 }
-
-
-
-#include "buffer_helpers.hpp"

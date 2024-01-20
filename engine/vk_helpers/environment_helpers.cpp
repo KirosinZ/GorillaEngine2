@@ -1,15 +1,12 @@
-//
-// Created by Kiril on 24.04.2023.
-//
-
 #include "environment_helpers.hpp"
 
 #include "instance_helpers.hpp"
 #include "physical_device_helpers.hpp"
+#include "queue_helpers.hpp"
 #include "device_helpers.hpp"
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk_utils::environment headless_env(
@@ -27,12 +24,12 @@ vk_utils::environment headless_env(
 
 	vk::raii::PhysicalDevice physical_device = vk_helpers::most_suitable_device(instance.enumeratePhysicalDevices());
 
-	std::vector<vk::QueueFamilyProperties> queue_properties = physical_device.getQueueFamilyProperties();
-	int32_t graphics = vk_helpers::queue_families(queue_properties, vk::QueueFlagBits::eGraphics)[0];
+	std::vector queue_families = vk_helpers::queue_families(instance, physical_device);
+	vk_utils::queue_family graphics_family = *std::ranges::find_if(queue_families, &vk_utils::queue_family::has_graphics);
 
-	std::vector<float> priorities = { 1.0f };
+	std::array priorities{ 1.0f };
 	std::vector<vk::DeviceQueueCreateInfo> device_queue_create_infos = {
-			vk_helpers::queue_create_info(graphics, priorities),
+			vk::DeviceQueueCreateInfo({}, graphics_family.index(), priorities)
 	};
 	vk::PhysicalDeviceFeatures features{};
 	features.samplerAnisotropy = true;
@@ -43,14 +40,14 @@ vk_utils::environment headless_env(
 			device_extensions,
 			features);
 
-	vk::raii::Queue graphics_queue = device.getQueue(graphics, 0);
-
 	return {
 		std::move(instance),
 		std::move(physical_device),
 		std::move(device),
-		graphics,
-		std::move(graphics_queue)
+		std::vector{
+			graphics_family
+		},
+		vk_helpers::get_queue(device, graphics_family)
 	};
 }
 
@@ -80,14 +77,12 @@ vk_utils::environment headful_env(
 
 	vk::raii::PhysicalDevice physical_device = vk_helpers::most_suitable_device(instance.enumeratePhysicalDevices());
 
-	std::vector<vk::QueueFamilyProperties> queue_properties = physical_device.getQueueFamilyProperties();
-	int32_t graphics = vk_helpers::queue_families(queue_properties, vk::QueueFlagBits::eGraphics)[0];
-	int32_t present = vk_helpers::present_families(queue_properties, physical_device, surfaces[0])[1];
+	std::vector queue_families = vk_helpers::queue_families(instance, physical_device);
+	vk_utils::queue_family graphics_family = *std::ranges::find_if(queue_families, &vk_utils::queue_family::has_all_graphics);
 
 	std::vector<float> priorities = { 1.0f };
 	std::vector<vk::DeviceQueueCreateInfo> device_queue_create_infos = {
-			vk_helpers::queue_create_info(graphics, priorities),
-			vk_helpers::queue_create_info(present, priorities),
+		//TODO: later...
 	};
 
 	std::vector<const char*> device_extensions_swapchain = device_extensions;
@@ -102,19 +97,15 @@ vk_utils::environment headful_env(
 			device_extensions_swapchain,
 			features);
 
-	vk::raii::Queue graphics_queue = device.getQueue(graphics, 0);
-	vk::raii::Queue present_queue = device.getQueue(present, 0);
-
 	return {
 			std::move(instance),
 			std::move(physical_device),
 			std::move(device),
-			graphics,
-			std::move(graphics_queue),
-			std::move(surfaces),
-			present,
-			std::move(present_queue),
+		std::vector{
+			graphics_family
+		},
+			vk_helpers::get_queue(device, graphics_family)
 	};
 }
 
-} // vk_helpers
+}

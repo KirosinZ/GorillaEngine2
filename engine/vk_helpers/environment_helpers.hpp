@@ -1,14 +1,9 @@
-//
-// Created by Kiril on 24.04.2023.
-//
-
-#ifndef DEEPLOM_ENVIRONMENT_HELPERS_HPP
-#define DEEPLOM_ENVIRONMENT_HELPERS_HPP
+#pragma once
 
 #include <vk_utils/environment.hpp>
 #include <engine/window/window.hpp>
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk_utils::environment headless_env(
@@ -27,6 +22,4 @@ vk_utils::environment headful_env(
 		const std::vector<const char*>& device_extensions = {});
 
 
-} // vk_helpers
-
-#endif //DEEPLOM_ENVIRONMENT_HELPERS_HPP
+}

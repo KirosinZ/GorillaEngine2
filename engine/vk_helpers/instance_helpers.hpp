@@ -1,14 +1,9 @@
-//
-// Created by Kiril on 24.04.2023.
-//
-
-#ifndef DEEPLOM_INSTANCE_HELPERS_HPP
-#define DEEPLOM_INSTANCE_HELPERS_HPP
+#pragma once
 
 #include <vulkan/vulkan_raii.hpp>
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk::ApplicationInfo application_info(
@@ -29,6 +24,4 @@ vk::raii::Instance instance(
 		const std::vector<const char*>& layers = {},
 		const std::vector<const char*>& extensions = {});
 
-} // vk_helpers
-
-#endif //DEEPLOM_INSTANCE_HELPERS_HPP
+}

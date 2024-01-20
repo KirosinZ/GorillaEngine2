@@ -14,6 +14,7 @@
 
 
 #include <engine/application/scene.h>
+#include <Resources/Shaders/PBR_pipeline/pbrpipeline.hpp>
 
 #include <vk_utils/environment.hpp>
 
@@ -73,39 +74,44 @@ private:
 	void initVulkan();
 
 	// Basic environment: graphics + present queues
-	gorilla::glfw::window window;
-	vk_utils::environment environment;
+	glfw::window _window;
 
-	static vk_utils::environment initEnvironment(const glfw::window& window);
-		static vk::raii::Instance createInstance(const vk::raii::Context& context, const glfw::window& window);
-		static vk::raii::SurfaceKHR createSurface(const glfw::window& window, const vk::raii::Instance& instance);
-		static vk::raii::PhysicalDevice createPhysDevice(const vk::raii::Instance& instance, const vk::raii::SurfaceKHR& surface, int& graphicsFamily, int& presentFamily);
-		static vk::raii::Device createLogicalDevice(const vk::raii::PhysicalDevice& phys_device, int graphics_family, int present_family);
-		static vk::raii::Queue createQueue(const vk::raii::Device& device, int index);
+	vk::raii::Instance _instance = nullptr;
+	vk::raii::PhysicalDevice _phys_device = nullptr;
+	vk::raii::Device _device = nullptr;
+
+	vk_utils::queue _graphics_queue;
+	vk_utils::queue _present_queue;
+	vk_utils::queue _transfer_queue;
+
+	void initEnvironment();
 	//--
 
 	// Swapchain and images
-    vk::raii::SwapchainKHR swapchain = nullptr;
-    std::vector<vk::Image> scImages;
-    vk::Format scImageFormat;
-    vk::Extent2D scImageExtent;
-    std::vector<vk::raii::ImageView> imageViews;
+	vk::raii::SurfaceKHR _surface = nullptr;
+    vk::raii::SwapchainKHR _swapchain = nullptr;
+    std::vector<vk::Image> _sc_images;
+    vk::Format _sc_format;
+	vk::ColorSpaceKHR _sc_cspace;
+	vk::PresentModeKHR _sc_present_mode;
+    vk::Extent2D _sc_extent;
+    std::vector<vk::raii::ImageView> _sc_image_views;
 
 	void initSwapchain(bool verbose = false);
-		void createSwapChain(bool verbose = false);
 		void createImageViews(bool verbose = false);
 
 	void recreateSwapChain(bool verbose = false);
 	//--
 
 	// Render State Declaration
-    vk::raii::RenderPass renderPass = nullptr;
-	vk::raii::DescriptorSetLayout scenewise_descriptor_set_layout = nullptr;
-	vk::raii::DescriptorSetLayout objectwise_descriptor_set_layout = nullptr;
+    vk::raii::RenderPass _render_pass = nullptr;
+	vk::raii::DescriptorSetLayout _scenewise_descriptor_set_layout = nullptr;
+	vk::raii::DescriptorSetLayout _objectwise_descriptor_set_layout = nullptr;
     vk::raii::PipelineLayout pipeline_layout = nullptr;
-    std::vector<vk::raii::Pipeline> pipelines;
-    std::vector<vk::raii::Framebuffer> framebuffers;
-    vk::raii::CommandPool commandPool = nullptr;
+    std::vector<vk::raii::Pipeline> _pipelines;
+	std::unique_ptr<pbr_pipeline> _pbr_pipeline = nullptr;
+    std::vector<vk::raii::Framebuffer> _framebuffer;
+    vk::raii::CommandPool _cmd_pool = nullptr;
 
 	void createRenderPass(bool verbose = false);
 	void createDescriptorSetLayout(bool verbose = false);
@@ -125,13 +131,13 @@ private:
 	vk::raii::DeviceMemory models_buffer_memory = nullptr;
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
-	std::vector<vk::raii::DescriptorSet> scenewise_descriptor_sets;
+	vk::raii::DescriptorSet _scenewise_descriptor_set = nullptr;
     std::vector<vk::raii::DescriptorSet> objectwise_descriptor_sets;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
 
-    vk::raii::Image depthImage = nullptr;
-    vk::raii::DeviceMemory depthImageMemory = nullptr;
-    vk::raii::ImageView depthImageView = nullptr;
+    vk::raii::Image _depth_image = nullptr;
+    vk::raii::DeviceMemory _depth_image_memory = nullptr;
+    vk::raii::ImageView _depth_image_view = nullptr;
 
 	void createUniformBuffers(bool verbose = false);
 	void createDepthResources(bool verbose = false);
@@ -149,6 +155,7 @@ private:
 	void loadModel(const std::string& name, engine::scene::prop& res, bool verbose = false);
 	void createVertexBuffers(engine::scene::prop& res, bool verbose = false);
 	void createIndexBuffers(engine::scene::prop& res, bool verbose = false);
+	void createSkybox();
 
     uint32_t currentFrame = 0;
 
@@ -168,30 +175,32 @@ private:
 	void createImguiDescriptorPool(bool verbose = false);
 	//--
 
+	void show_meshes();
+	void show_point_lights();
+	void show_spot_lights();
+	void show_control_window();
 	void drawFrame();
 
 
-	static vk::raii::PhysicalDevice pickDevice(const std::vector<vk::raii::PhysicalDevice> &devices);
-
-	static SwapChainSupportDetails querySupport(const vk_utils::environment& environment);
     static std::pair<vk::Format, vk::ColorSpaceKHR> pickBestFormat(const SwapChainSupportDetails& details);
     static vk::PresentModeKHR pickPresentMode(const SwapChainSupportDetails& details);
 
-	static uint32_t findMemoryType(const vk_utils::environment& environment, uint32_t filter, vk::MemoryPropertyFlags properties);
-	static vk::Format findSupportedFormat(
-			const vk_utils::environment& environment,
+	uint32_t findMemoryType(uint32_t filter, vk::MemoryPropertyFlags properties);
+	vk::Format findSupportedFormat(
 			const std::vector<vk::Format>& candidates,
 			vk::ImageTiling tiling,
 			vk::FormatFeatureFlags features);
-	static vk::Format findDepthFormat(const vk_utils::environment& environment);
+	vk::Format findDepthFormat();
 
-	static vk::raii::ShaderModule createShader(const vk_utils::environment& environment, const std::vector<uint32_t>& code);
-	static std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> createBuffer(const vk_utils::environment& environment, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
-	static std::pair<vk::raii::Image, vk::raii::DeviceMemory> createImage(
-			const vk_utils::environment& environment,
+	vk::raii::ShaderModule createShader(const std::vector<uint32_t>& code);
+	std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> createBuffer(
+			vk::DeviceSize size,
+			vk::BufferUsageFlags usage,
+			vk::MemoryPropertyFlags properties);
+	std::pair<vk::raii::Image, vk::raii::DeviceMemory> createImage(
 			uint32_t width,
 			uint32_t height,
-			uint32_t  mipLevels,
+			uint32_t mipLevels,
 			vk::Format format,
 			vk::ImageTiling tiling,
 			vk::ImageUsageFlags usage,
@@ -199,34 +208,26 @@ private:
 
 	static std::vector<char> readFile(const std::string& filename);
 
-	static vk::raii::CommandBuffer beginSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandPool& cmd_pool);
-	static void endSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandBuffer& buffer);
+	vk::raii::CommandBuffer beginSingleTimeCommands();
+	void endSingleTimeCommands(const vk::raii::CommandBuffer& buffer);
 
-	static void copyBuffer(
-			const vk_utils::environment& environment,
-			const vk::raii::CommandPool& cmd_pool,
+	void copyBuffer(
 			const vk::raii::Buffer& srcBuffer,
 			const vk::raii::Buffer& dstBuffer,
 			vk::DeviceSize size);
-	static void copyBufferToImage(
-			const vk_utils::environment& environment,
-			const vk::raii::CommandPool& cmd_pool,
-			vk::Buffer buffer,
-			vk::Image image,
+	void copyBufferToImage(
+			const vk::raii::Buffer& buffer,
+			const vk::raii::Image& image,
 			uint32_t width,
 			uint32_t height);
 
-	static void transitionImageLayout(
-			const vk_utils::environment& environment,
-			const vk::raii::CommandPool& cmd_pool,
+	void transitionImageLayout(
 			vk::Image image,
 			vk::Format format,
 			vk::ImageLayout oldLayout,
 			vk::ImageLayout newLayout,
 			uint32_t mipLevels);
-	static void generateMipmaps(
-			const vk_utils::environment& environment,
-			const vk::raii::CommandPool& cmd_pool,
+	void generateMipmaps(
 			vk::Image img,
 			vk::Format imageFormat,
 			int32_t texW,

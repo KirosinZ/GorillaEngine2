@@ -13,7 +13,7 @@
 #include <glm/vec4.hpp>
 #include <glm/glm.hpp>
 
-namespace gorilla::geom
+namespace gorilla::asset
 {
 
 class obj
@@ -136,7 +136,7 @@ std::vector<glm::vec3> calculate_normals(const std::vector<glm::vec4>& positions
 std::vector<glm::mat3> calculate_normals_tangents_bitangents(const std::vector<glm::vec4>& positions, const std::vector<glm::vec3>& texcoords, const std::vector<obj::index_triplet>& triangle_indices);
 
 template <typename T>
-inline std::vector<T> triangulate(const std::vector<T>& flatdata, const std::vector<uint32_t>& offsets)
+std::vector<T> triangulate(const std::vector<T>& flatdata, const std::vector<uint32_t>& offsets)
 {
 	std::vector<T> res;
 	const int n_faces = offsets.size() - 1;
@@ -146,16 +146,23 @@ inline std::vector<T> triangulate(const std::vector<T>& flatdata, const std::vec
 		const int offset = offsets[i];
 		const int count = offsets[i + 1] - offset;
 
-		for (int j = 0; j <= count / 2; j++)
+		for (int j = 0; j < count - 2; j++)
 		{
-			int index = offset + (-(j + 1) / 2 + count) % count;
+			int tmp = -(j + 1) / 2;
+			if (tmp < 0)
+				tmp += count;
+
+			int index = offset + tmp;
 			res.push_back(flatdata[index]);
 
-			index = offset + (j / 2 + 1 + count) % count;
+			tmp = j / 2 + 1;
+			index = offset + tmp;
 			res.push_back(flatdata[index]);
 
-			index = (j + 1) / 2 + 1;
-			index = offset + ((j % 2 == 0 ? -index : index) + count) % count;
+			tmp = (j + 1) / 2 + 1;
+			if (j % 2 == 0)
+				tmp = count - tmp;
+			index = offset + tmp;
 			res.push_back(flatdata[index]);
 		}
 	}

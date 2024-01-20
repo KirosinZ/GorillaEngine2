@@ -1,11 +1,7 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
 #include "command_helpers.hpp"
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk::raii::CommandBuffer single_time_command(
@@ -30,7 +26,7 @@ void end_command(
 		const vk_utils::environment& env,
 		const vk::raii::CommandBuffer& cmd)
 {
-	const vk::raii::Queue& graphics_queue = env.graphics_queue();
+	const vk::raii::Queue& graphics_queue = env.graphics_queue().vk_queue();
 
 	cmd.end();
 

@@ -14,11 +14,13 @@
 #include <vk_helpers/helpers.hpp>
 #include <asset_loader/img/image.h>
 
+#include <Resources/Shaders/PBR_pipeline/pbrpipeline.hpp>
+
 namespace gorilla
 {
 
 Application::Application(std::string name, int w, int h, std::vector<uint32_t> vert, std::vector<uint32_t> frag, const engine::scene& scene)
-		: window(std::move(name), w, h), vertCode(std::move(vert)), fragCode(std::move(frag)), scene(scene)
+		: _window(std::move(name), w, h), vertCode(std::move(vert)), fragCode(std::move(frag)), scene(scene)
 {
 	initVulkan();
 }
@@ -26,10 +28,10 @@ Application::Application(std::string name, int w, int h, std::vector<uint32_t> v
 void
 Application::initVulkan()
 {
-	environment = initEnvironment(window);
+	initEnvironment();
 
 	initSwapchain();
-	window.cursorpos_event += [&] (const glfw::window& wnd, double xpos, double ypos)
+	_window.cursorpos_event += [&] (const glfw::window& wnd, double xpos, double ypos)
 	{
 		if (isMenuShowing)
 			return;
@@ -53,7 +55,8 @@ Application::initVulkan()
 
 	createRenderPass();
 	createDescriptorSetLayout();
-	createGraphicsPipeline();
+	// createGraphicsPipeline();
+	_pbr_pipeline = std::make_unique<pbr_pipeline>(_device, _render_pass, 0, _scenewise_descriptor_set_layout, _objectwise_descriptor_set_layout);
 	createCommandPool();
 	createDepthResources();
 	createFramebuffers();
@@ -103,202 +106,138 @@ Application::initVulkan()
 //	ImGuiIO& io = ImGui::GetIO();
 //	ImGui_ImplGlfw_InitForVulkan(window.handle(), true);
 	ImGui_ImplVulkan_InitInfo i{};
-	i.Instance = *environment.instance();
-	i.PhysicalDevice = *environment.phys_device();
-	i.Device = *environment.device();
-	i.Queue = *environment.graphics_queue();
-	i.QueueFamily = environment.graphics_queue_index();
+	i.Instance = *_instance;
+	i.PhysicalDevice = *_phys_device;
+	i.Device = *_device;
+	i.Queue = *_graphics_queue.vk_queue();
+	i.QueueFamily = _graphics_queue.type().index();
 	i.DescriptorPool = *ImguiDescriptorPool;
 	i.ImageCount = maxFrames;
 	i.MinImageCount = maxFrames;
 	i.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 //	ImGui_ImplVulkan_Init(&i, *renderPass);
-	imgui = std::make_unique<engine::misc::imgui_object>(window.handle(), true, &i,
-	                                   *renderPass);
+	imgui = std::make_unique<engine::misc::imgui_object>(_window.handle(), true, &i,
+	                                   *_render_pass);
 
-	auto cmd = beginSingleTimeCommands(environment, commandPool);
+	auto cmd = beginSingleTimeCommands();
 	ImGui_ImplVulkan_CreateFontsTexture(*cmd);
-	endSingleTimeCommands(environment, cmd);
+	endSingleTimeCommands(cmd);
 
 	ImGui_ImplVulkan_DestroyFontUploadObjects();
 }
 
-vk_utils::environment
-Application::initEnvironment(const glfw::window& window)
+void Application::initEnvironment()
 {
-	vk::raii::Instance instance = createInstance(vk_utils::environment::context(), window);
-	std::vector<vk::raii::SurfaceKHR> surfaces;
-	surfaces.push_back(createSurface(window, instance));
-	int graphics_family = -1;
-	int present_family = -1;
-	vk::raii::PhysicalDevice phys_device    = createPhysDevice(instance, surfaces[0], graphics_family, present_family);
-	vk::raii::Device device = createLogicalDevice(phys_device, graphics_family, present_family);
-	vk::raii::Queue graphics_queue = createQueue(device, graphics_family);
-	vk::raii::Queue present_queue  = createQueue(device, present_family);
+	_instance = vkh::instance(
+		_window.name(),
+		VK_MAKE_VERSION(1, 0, 0),
+		std::vector<const char*>{
+			"VK_LAYER_KHRONOS_validation"
+		},
+		glfw::window::extensions());
 
-	return vk_utils::environment(
-			std::move(instance),
-			std::move(phys_device),
-			std::move(device),
-			graphics_family,
-			std::move(graphics_queue),
-			std::move(surfaces),
-			present_family,
-			std::move(present_queue));
-}
+	_phys_device = vkh::most_suitable_device(_instance.enumeratePhysicalDevices());
+	std::vector queue_families = vkh::queue_families(_instance, _phys_device);
 
-vk::raii::Instance
-Application::createInstance(const vk::raii::Context& context, const glfw::window& window)
-{
-	vk::ApplicationInfo ai(
-			window.name().c_str(),
-			VK_MAKE_API_VERSION(1, 0, 1, 0),
-			Engine::Name.c_str(),
-			Engine::Version,
-			Engine::VulkanVersion
-	);
+	std::optional<vk_utils::queue_family> graphics_family = std::nullopt,
+		present_family = std::nullopt,
+		transfer_family = std::nullopt;
 
-	const std::vector<const char*> layers{
-
-	};
-
-	std::vector<const char*> extensions = glfw::window::extensions();
-
-	vk::InstanceCreateInfo ici({}, &ai, layers, extensions);
-
-	return context.createInstance(ici);
-}
-
-vk::raii::SurfaceKHR
-Application::createSurface(const glfw::window& window, const vk::raii::Instance& instance)
-{
-	return window.surface(instance);
-}
-
-vk::raii::PhysicalDevice
-Application::createPhysDevice(const vk::raii::Instance& instance, const vk::raii::SurfaceKHR& surface, int& graphics_family, int& present_family)
-{
-	vk::raii::PhysicalDevice               phys_device    = pickDevice(instance.enumeratePhysicalDevices());
-	std::vector<vk::QueueFamilyProperties> queue_families = phys_device.getQueueFamilyProperties();
-
-	for (int i = 0; i < queue_families.size(); ++i)
+	for (auto qf: queue_families)
 	{
-		if (queue_families[i].queueFlags & vk::QueueFlagBits::eGraphics)
+		if (!graphics_family.has_value() && qf.has_graphics())
 		{
-			graphics_family = i;
+			graphics_family = qf;
+			continue;
 		}
 
-		if (phys_device.getSurfaceSupportKHR(i, *surface))
+		if (!present_family.has_value() && qf.has_present())
 		{
-			present_family = i;
+			present_family = qf;
+			continue;
 		}
+
+		if (!transfer_family.has_value() && qf.has_transfer())
+			transfer_family = qf;
 	}
 
-	return std::move(phys_device);
-}
-
-vk::raii::Device
-Application::createLogicalDevice(const vk::raii::PhysicalDevice& phys_device, int graphics_family, int present_family)
-{
-	const std::array<float, 1> priorities = { 1.0f };
-
-	vk::DeviceQueueCreateInfo dqci({}, graphics_family, priorities);
-	vk::DeviceQueueCreateInfo dqci2({}, present_family, priorities);
-
-	std::vector<vk::DeviceQueueCreateInfo> dqcis = {
-			dqci,
-			dqci2
+	std::array priorities{ 1.0f };
+	std::vector dqcis{
+		vk::DeviceQueueCreateInfo({}, graphics_family->index(), priorities),
+		vk::DeviceQueueCreateInfo({}, present_family->index(), priorities),
+		vk::DeviceQueueCreateInfo({}, transfer_family->index(), priorities),
 	};
 
-	std::vector<const char*> deviceLayers{
+	_device = vkh::device(
+		_phys_device,
+		dqcis,
+		std::vector{
+			"VK_KHR_swapchain"
+		},
+		_phys_device.getFeatures());
+	//sampler anisotropy feature
 
-	};
+	_graphics_queue = vkh::get_queue(_device, *graphics_family);
+	_present_queue = vkh::get_queue(_device, *present_family);
+	_transfer_queue = vkh::get_queue(_device, *transfer_family);
 
-	std::vector<const char*> deviceExtensions{
-			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-	};
-
-	vk::PhysicalDeviceFeatures features{};
-	features.samplerAnisotropy = true;
-
-	vk::DeviceCreateInfo dci({}, dqcis, deviceLayers, deviceExtensions, &features);
-
-	return phys_device.createDevice(dci);
+	_surface = _window.surface(_instance);
 }
 
-vk::raii::Queue
-Application::createQueue(const vk::raii::Device& device, int index)
+void Application::initSwapchain(bool verbose)
 {
-	return device.getQueue(index, 0);
-}
+	SwapChainSupportDetails details{};
 
+	details.capabilities = _phys_device.getSurfaceCapabilitiesKHR(*_surface);
+	details.formats = _phys_device.getSurfaceFormatsKHR(*_surface);
+	details.presentModes = _phys_device.getSurfacePresentModesKHR(*_surface);
 
-void
-Application::initSwapchain(bool verbose)
-{
-	createSwapChain(verbose);
+	std::tie(_sc_format, _sc_cspace) = pickBestFormat(details);
+	_sc_present_mode = pickPresentMode(details);
+
+	_sc_extent = details.capabilities.currentExtent;
+
+	uint32_t img_count = std::clamp(2u, details.capabilities.minImageCount, details.capabilities.maxImageCount);
+
+	std::array queue_families{
+		_graphics_queue.type().index()
+	};
+	vk::SwapchainCreateInfoKHR scci(
+		{},
+		*_surface,
+		img_count,
+		_sc_format,
+		_sc_cspace,
+		_sc_extent,
+		1,
+		vk::ImageUsageFlagBits::eColorAttachment,
+		vk::SharingMode::eExclusive,
+		queue_families,
+		details.capabilities.currentTransform,
+		vk::CompositeAlphaFlagBitsKHR::eOpaque,
+		_sc_present_mode,
+		false);
+	_swapchain = _device.createSwapchainKHR(scci);
+
+	std::vector sc_images_raw = _swapchain.getImages();
+	std::ranges::transform(sc_images_raw, std::back_inserter(_sc_images), [] (const VkImage& img) -> vk::Image {
+		return vk::Image(img);
+	});
+
 	createImageViews(verbose);
 }
 
-void
-Application::createSwapChain(bool verbose)
+void Application::createImageViews(bool verbose)
 {
-	Application::SwapChainSupportDetails details = querySupport(environment);
-	vk::Format format;
-	vk::ColorSpaceKHR colorSpace;
-	std::tie(format, colorSpace) = pickBestFormat(details);
-	vk::PresentModeKHR presentMode = pickPresentMode(details);
-
-
-	vk::Extent2D extent = window.framebuffer_size();
-	vk::Extent2D actualExtent = extent;
-	actualExtent.width = std::clamp(
-			actualExtent.width, details.capabilities.minImageExtent.width,
-			details.capabilities.maxImageExtent.width);
-	actualExtent.height = std::clamp(
-			actualExtent.height, details.capabilities.minImageExtent.height,
-			details.capabilities.maxImageExtent.height);
-
-	std::array<uint32_t, 2> bl = { uint32_t(environment.graphics_queue_index()), uint32_t (environment.present_queue_index()) };
-	vk::SwapchainCreateInfoKHR scci(
-			{},
-			*environment.surface(0),
-			3,
-			format,
-			colorSpace,
-			actualExtent,
-			1,
-			vk::ImageUsageFlagBits::eColorAttachment,
-			vk::SharingMode::eConcurrent,
-			bl,
-			details.capabilities.currentTransform,
-			//vk::SurfaceTransformFlagBitsKHR::eIdentity,
-			vk::CompositeAlphaFlagBitsKHR::eOpaque,
-			presentMode,
-			true);
-	swapchain = vk::raii::SwapchainKHR(environment.device(), scci);
-	auto imgs = swapchain.getImages();
-	scImages.clear();
-	for (auto img: imgs)
-	{
-		scImages.emplace_back(img);
-	}
-	scImageExtent = actualExtent;
-	scImageFormat = format;
-}
-
-void
-Application::createImageViews(bool verbose)
-{
-	imageViews.clear();
-	imageViews.reserve(scImages.size());
-	for (auto& scImage: scImages)
+	_sc_image_views.clear();
+	_sc_image_views.reserve(_sc_images.size());
+	for (auto& sc_image: _sc_images)
 	{
 		vk::ImageViewCreateInfo ivci(
 				{},
-				scImage,
+				sc_image,
 				vk::ImageViewType::e2D,
-				scImageFormat,
+				_sc_format,
 				vk::ComponentMapping(),
 				vk::ImageSubresourceRange(
 						vk::ImageAspectFlagBits::eColor,
@@ -306,15 +245,13 @@ Application::createImageViews(bool verbose)
 						1,
 						0,
 						1));
-		imageViews.emplace_back(environment.device(), ivci);
+		_sc_image_views.emplace_back(_device, ivci);
 	}
 }
 
 
 void Application::createRenderPass(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
 	vk::SubpassDependency sd(
 			VK_SUBPASS_EXTERNAL,
 			0,
@@ -325,7 +262,7 @@ void Application::createRenderPass(bool verbose)
 
 	vk::AttachmentDescription colorAttachment(
 			{},
-			scImageFormat,
+			_sc_format,
 			vk::SampleCountFlagBits::e1,
 			vk::AttachmentLoadOp::eClear,
 			vk::AttachmentStoreOp::eStore,
@@ -336,7 +273,7 @@ void Application::createRenderPass(bool verbose)
 
 	vk::AttachmentDescription depthAttachment(
 			{},
-			findDepthFormat(environment),
+			findDepthFormat(),
 			vk::SampleCountFlagBits::e1,
 			vk::AttachmentLoadOp::eClear,
 			vk::AttachmentStoreOp::eDontCare,
@@ -361,7 +298,7 @@ void Application::createRenderPass(bool verbose)
 			{},
 			&dref);
 
-	std::vector<vk::AttachmentDescription> attachments = {
+	std::vector attachments = {
 			colorAttachment,
 			depthAttachment
 	};
@@ -372,13 +309,11 @@ void Application::createRenderPass(bool verbose)
 			subpass,
 			sd);
 
-	renderPass = device.createRenderPass(rpci);
+	_render_pass = _device.createRenderPass(rpci);
 }
 
 void Application::createDescriptorSetLayout(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
 	std::vector<vk::DescriptorSetLayoutBinding> scenewise_layout = {
 			{ 0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex },
 			{ 1, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eFragment },
@@ -395,18 +330,16 @@ void Application::createDescriptorSetLayout(bool verbose)
 	};
 
 	vk::DescriptorSetLayoutCreateInfo scenewise_layout_ci({}, scenewise_layout);
-	scenewise_descriptor_set_layout = device.createDescriptorSetLayout(scenewise_layout_ci);
+	_scenewise_descriptor_set_layout = _device.createDescriptorSetLayout(scenewise_layout_ci);
 
 	vk::DescriptorSetLayoutCreateInfo objectwise_layout_ci({}, objectwise_layout);
-	objectwise_descriptor_set_layout = device.createDescriptorSetLayout(objectwise_layout_ci);
+	_objectwise_descriptor_set_layout = _device.createDescriptorSetLayout(objectwise_layout_ci);
 }
 
 void Application::createGraphicsPipeline(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
-	vk::raii::ShaderModule vert = createShader(environment, vertCode);
-	vk::raii::ShaderModule frag = createShader(environment, fragCode);
+	vk::raii::ShaderModule vert = createShader(vertCode);
+	vk::raii::ShaderModule frag = createShader(fragCode);
 
 	vk::PipelineShaderStageCreateInfo pssci_v({}, vk::ShaderStageFlagBits::eVertex, *vert, "main");
 	vk::PipelineShaderStageCreateInfo pssci_f({}, vk::ShaderStageFlagBits::eFragment, *frag, "main");
@@ -458,13 +391,13 @@ void Application::createGraphicsPipeline(bool verbose)
 			{ 0.0f, 0.0f, 0.0f, 0.0f });
 
 
-	std::vector<vk::DescriptorSetLayout> layouts = {
-			*scenewise_descriptor_set_layout,
-			*objectwise_descriptor_set_layout,
+	std::vector layouts = {
+			*_scenewise_descriptor_set_layout,
+			*_objectwise_descriptor_set_layout,
 	};
 	vk::PipelineLayoutCreateInfo plci({}, layouts);
 
-	pipeline_layout = device.createPipelineLayout(plci);
+	pipeline_layout = _device.createPipelineLayout(plci);
 
 	vk::GraphicsPipelineCreateInfo gpci(
 			{},
@@ -479,58 +412,59 @@ void Application::createGraphicsPipeline(bool verbose)
 			&cbsci,
 			&pdsci,
 			*pipeline_layout,
-			*renderPass,
+			*_render_pass,
 			0);
 
-	pipelines = device.createGraphicsPipelines(nullptr, gpci);
+	_pipelines = _device.createGraphicsPipelines(nullptr, gpci);
 }
 
 void Application::createFramebuffers(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
-	framebuffers.clear();
-	framebuffers.reserve(imageViews.size());
-	for (auto& imageView: imageViews)
+	_framebuffer.clear();
+	_framebuffer.reserve(_sc_image_views.size());
+	for (auto& sc_image_view: _sc_image_views)
 	{
-		vk::ImageView attachments[] = {
-				*imageView,
-				*depthImageView,
+		std::vector attachments{
+				*sc_image_view,
+				*_depth_image_view,
 		};
 
-		vk::FramebufferCreateInfo fci({}, *renderPass, attachments, scImageExtent.width, scImageExtent.height, 1);
-		framebuffers.push_back(device.createFramebuffer(fci));
+		vk::FramebufferCreateInfo fci(
+			{},
+			*_render_pass,
+			attachments,
+			_sc_extent.width,
+			_sc_extent.height,
+			1);
+		_framebuffer.push_back(_device.createFramebuffer(fci));
 	}
 }
 
 void Application::createCommandPool(bool verbose)
 {
-	const int graphics_queue_family = environment.graphics_queue_index();
-	const vk::raii::Device& device = environment.device();
+	vk::CommandPoolCreateInfo cpci(
+		vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+		_graphics_queue.type().index());
 
-	vk::CommandPoolCreateInfo cpci(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, graphics_queue_family);
-
-	commandPool = device.createCommandPool(cpci);
+	_cmd_pool = _device.createCommandPool(cpci);
 }
 
 void Application::createDepthResources(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
+	vk::Format format = findDepthFormat();
 
-	vk::Format format = findDepthFormat(environment);
-//	auto&& images = createImage(environment,
-//			scImageExtent.width, scImageExtent.height, 1, format, vk::ImageTiling::eOptimal,
-//			vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal);
-//	depthImage = std::move(images.first);
-//	depthImageMemory = std::move(images.second);
-
-	std::tie(depthImage, depthImageMemory) = createImage(environment,
-			scImageExtent.width, scImageExtent.height, 1, format, vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	std::tie(_depth_image, _depth_image_memory) = createImage(
+		_sc_extent.width,
+		_sc_extent.height,
+		1,
+		format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eDepthStencilAttachment,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	vk::ImageViewCreateInfo ivci(
 			{},
-			*depthImage,
+			*_depth_image,
 			vk::ImageViewType::e2D,
 			format,
 			{},
@@ -540,12 +474,10 @@ void Application::createDepthResources(bool verbose)
 					1,
 					0,
 					1 });
-	depthImageView = device.createImageView(ivci);
+	_depth_image_view = _device.createImageView(ivci);
 
 	transitionImageLayout(
-			environment,
-			commandPool,
-			*depthImage,
+			*_depth_image,
 			format,
 			vk::ImageLayout::eUndefined,
 			vk::ImageLayout::eDepthStencilAttachmentOptimal,
@@ -554,25 +486,14 @@ void Application::createDepthResources(bool verbose)
 
 void Application::createTextureImage(const asset::image& image, engine::texture& res, vk::Format format)
 {
-//	int texW, texH, texChannels;
-//	stbi_uc* pixels = stbi_load(name.c_str(), &texW, &texH, &texChannels, STBI_rgb_alpha);
-//	vk::DeviceSize imageSize = texW * texH * 4;
-//	res.texture.mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max(texW, texH)))) + 1;
-//
-//	if (!pixels)
-//	{
-//		throw std::runtime_error("failed to load image");
-//	}
-
 	const vk::DeviceSize image_size = image.width() * image.height() * 4;
 	const uint32_t mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max(image.width(), image.height())))) + 1;
 
 	vk::raii::Buffer staging_buffer = nullptr;
 	vk::raii::DeviceMemory staging_memory = nullptr;
-	std::tie(staging_buffer, staging_memory) = vkh::staging_buffer(environment, image_size);
-//	auto&& [stagingBuffer, stagingBufferMemory] = createBuffer(
-//			imageSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible
-//			                                                  | vk::MemoryPropertyFlagBits::eHostCoherent);
+	std::tie(staging_buffer, staging_memory) = createBuffer(
+			image_size, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible
+			                                                  | vk::MemoryPropertyFlagBits::eHostCoherent);
 	void* data = staging_memory.mapMemory(0, image_size);
 	std::memcpy(data, image.data().data(), image_size);
 	staging_memory.unmapMemory();
@@ -580,8 +501,7 @@ void Application::createTextureImage(const asset::image& image, engine::texture&
 
 	vk::raii::Image texture_image = nullptr;
 	vk::raii::DeviceMemory texture_memory = nullptr;
-	std::tie(texture_image, texture_memory) = vkh::image(
-			environment,
+	std::tie(texture_image, texture_memory) = createImage(
 			image.width(),
 			image.height(),
 			mip_levels,
@@ -591,60 +511,32 @@ void Application::createTextureImage(const asset::image& image, engine::texture&
 			| vk::ImageUsageFlagBits::eTransferDst
 			| vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
-//	auto&& tmp = createImage(
-//			texW, texH, res.texture.mip_levels, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
-//			vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst
-//			| vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlagBits::eDeviceLocal);
-//	res.texture.image = std::move(tmp.first);
-//	res.texture.mem = std::move(tmp.second);
 
-	vkh::transition_image_layout(
-			environment,
-			commandPool,
-			texture_image,
+	transitionImageLayout(
+			*texture_image,
 			format,
 			vk::ImageLayout::eUndefined,
 			vk::ImageLayout::eTransferDstOptimal,
 			mip_levels);
-	vkh::copy_buffer_to_image(
-			environment,
-			commandPool,
+	copyBufferToImage(
 			staging_buffer,
 			texture_image,
 			image.width(),
 			image.height());
-	vkh::generate_mipmaps(
-			environment,
-			commandPool,
-			texture_image,
+	generateMipmaps(
+			*texture_image,
 			format,
 			image.width(),
 			image.height(),
 			mip_levels);
-//	vkh::transition_image_layout(
-//			environment,
-//			commandPool,
-//			texture_image,
-//			format,
-//			vk::ImageLayout::eTransferDstOptimal,
-//			vk::ImageLayout::eShaderReadOnlyOptimal,
-//			mip_levels);
 
 	res.image = std::move(texture_image);
 	res.mip_levels = mip_levels;
 	res.mem = std::move(texture_memory);
-
-//	transitionImageLayout(
-//			*res.texture.image, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-//			res.texture.mip_levels);
-//	copyBufferToImage(*stagingBuffer, *res.texture.image, texW, texH);
-//	transitionImageLayout(*texture, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels);
-//	generateMipmaps(*res.texture.image, vk::Format::eR8G8B8A8Srgb, texW, texH, res.texture.mip_levels);
 }
 
 void Application::createTextureImageView(engine::texture& res, vk::Format format)
 {
-	const vk::raii::Device& device = environment.device();
 	vk::ImageViewCreateInfo ivci(
 			{},
 			*res.image,
@@ -657,15 +549,12 @@ void Application::createTextureImageView(engine::texture& res, vk::Format format
 					res.mip_levels,
 					0,
 					1));
-	res.image_view = device.createImageView(ivci);
+	res.image_view = _device.createImageView(ivci);
 }
 
 void Application::createTextureSampler(engine::texture& res)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-	const vk::raii::Device& device = environment.device();
-
-	vk::PhysicalDeviceProperties properties = phys_device.getProperties();
+	vk::PhysicalDeviceProperties properties = _phys_device.getProperties();
 
 	vk::SamplerCreateInfo sci(
 			{},
@@ -681,73 +570,74 @@ void Application::createTextureSampler(engine::texture& res)
 			vk::BorderColor::eIntOpaqueBlack,
 			false);
 
-	res.sampler = device.createSampler(sci);
+	res.sampler = _device.createSampler(sci);
 }
 
 
 void Application::loadModel(const std::string& name, engine::scene::prop& res, bool verbose)
 {
-	mesh::vertex v;
-	v.position = glm::vec3(-1.0f, -1.0f, 0.0f);
-	v.texcoord = glm::vec3(0.0f, 0.0f, 0.0f);
-	v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
-	res.mesh.vertices.push_back(v);
-	v.position = glm::vec3(1.0f, -1.0f, 0.0f);
-	v.texcoord = glm::vec3(2.0f, 0.0f, 0.0f);
-	res.mesh.vertices.push_back(v);
-	v.position = glm::vec3(1.0f, 1.0f, 0.0f);
-	v.texcoord = glm::vec3(2.0f, 2.0f, 0.0f);
-	res.mesh.vertices.push_back(v);
-	v.position = glm::vec3(-1.0f, 1.0f, 0.0f);
-	v.texcoord = glm::vec3(0.0f, 2.0f, 0.0f);
-	res.mesh.vertices.push_back(v);
-	res.mesh.indices = {
-			0, 1, 2,
-			0, 2, 3,
-	};
-	calculate_tangent_space(res.mesh);
-	return;
+//	mesh::vertex v;
+//	v.position = glm::vec3(-1.0f, -1.0f, 0.0f);
+//	v.texcoord = glm::vec3(0.0f, 0.0f, 0.0f);
+//	v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+//	res.mesh.vertices.push_back(v);
+//	v.position = glm::vec3(1.0f, -1.0f, 0.0f);
+//	v.texcoord = glm::vec3(2.0f, 0.0f, 0.0f);
+//	res.mesh.vertices.push_back(v);
+//	v.position = glm::vec3(1.0f, 1.0f, 0.0f);
+//	v.texcoord = glm::vec3(2.0f, 2.0f, 0.0f);
+//	res.mesh.vertices.push_back(v);
+//	v.position = glm::vec3(-1.0f, 1.0f, 0.0f);
+//	v.texcoord = glm::vec3(0.0f, 2.0f, 0.0f);
+//	res.mesh.vertices.push_back(v);
+//	res.mesh.indices = {
+//			0, 1, 2,
+//			0, 2, 3,
+//	};
+//	calculate_tangent_space(res.mesh);
+//	return;
 
-	geom::obj obj = geom::obj::load_obj(name);
-//	obj = geom::triangulate_obj(obj);
-
-	std::map<std::pair<int32_t, int32_t>, int32_t> vertices;
-
-	std::vector<std::set<int>> vertex_to_triangle(obj.n_vertices());
-
-	for (const geom::obj::index_triplet& t : obj.face_indices())
-	{
-		std::pair<int32_t, int32_t> key = { t.vi, t.vti };
-
-		const auto& thing = vertices.find(key);
-
-		if (thing == vertices.end())
-		{
-			mesh::vertex v{};
-			v.position = obj.vertices()[t.vi];
-			v.texcoord = obj.texcoords()[t.vti];
-			v.normal = obj.normals()[t.vni];
-//			v.texcoord.y = 1.0f - v.texcoord.y;
-
-			vertices.insert_or_assign(key, res.mesh.vertices.size());
-			res.mesh.vertices.push_back(v);
-		}
-		res.mesh.indices.push_back(vertices.at(key));
-		vertex_to_triangle[t.vi].insert(vertices.at(key));
-	}
-
-	std::vector<std::vector<int>> triangle_to_vertex(obj.n_face_indices());
-	for (int i = 0; i < vertex_to_triangle.size(); i++)
-	{
-		for (auto iter = vertex_to_triangle[i].begin(); iter != vertex_to_triangle[i].end(); iter++)
-		{
-			for (auto inter = vertex_to_triangle[i].begin(); inter != vertex_to_triangle[i].end(); inter++)
-			{
-				triangle_to_vertex[*iter].push_back(*inter);
-			}
-		}
-	}
-	calculate_tangent_space(res.mesh);
+	asset::obj obj = asset::obj::load_obj(name);
+	res.mesh = mesh::from_obj(obj);
+//	obj = asset::triangulate_obj(obj);
+//
+//	std::map<std::pair<int32_t, int32_t>, int32_t> vertices;
+//
+//	std::vector<std::set<int>> vertex_to_triangle(obj.n_vertices());
+//
+//	for (const asset::obj::index_triplet& t : obj.face_indices())
+//	{
+//		std::pair<int32_t, int32_t> key = { t.vi, t.vti };
+//
+//		const auto& thing = vertices.find(key);
+//
+//		if (thing == vertices.end())
+//		{
+//			mesh::vertex v{};
+//			v.position = obj.vertices()[t.vi];
+//			v.texcoord = obj.texcoords()[t.vti];
+//			v.normal = obj.normals()[t.vni];
+////			v.texcoord.y = 1.0f - v.texcoord.y;
+//
+//			vertices.insert_or_assign(key, res.mesh.vertices.size());
+//			res.mesh.vertices.push_back(v);
+//		}
+//		res.mesh.indices.push_back(vertices.at(key));
+//		vertex_to_triangle[t.vi].insert(vertices.at(key));
+//	}
+//
+//	std::vector<std::vector<int>> triangle_to_vertex(obj.n_face_indices());
+//	for (int i = 0; i < vertex_to_triangle.size(); i++)
+//	{
+//		for (auto iter = vertex_to_triangle[i].begin(); iter != vertex_to_triangle[i].end(); iter++)
+//		{
+//			for (auto inter = vertex_to_triangle[i].begin(); inter != vertex_to_triangle[i].end(); inter++)
+//			{
+//				triangle_to_vertex[*iter].push_back(*inter);
+//			}
+//		}
+//	}
+//	calculate_tangent_space(res.mesh);
 }
 
 void Application::createVertexBuffers(engine::scene::prop& res, bool verbose)
@@ -755,7 +645,6 @@ void Application::createVertexBuffers(engine::scene::prop& res, bool verbose)
 	const vk::DeviceSize size = sizeof(res.mesh.vertices[0]) * res.mesh.vertices.size();
 
 	auto&& [stagingBuffer, stagingBufferMemory] = createBuffer(
-			environment,
 			size,
 			vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -765,7 +654,6 @@ void Application::createVertexBuffers(engine::scene::prop& res, bool verbose)
 	stagingBufferMemory.unmapMemory();
 
 	auto&& buffers = createBuffer(
-			environment,
 			size,
 			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -773,8 +661,6 @@ void Application::createVertexBuffers(engine::scene::prop& res, bool verbose)
 	res.geom_buffer.vertex_buffer_memory = std::move(buffers.second);
 
 	copyBuffer(
-			environment,
-			commandPool,
 			stagingBuffer,
 			res.geom_buffer.vertex_buffer,
 			size);
@@ -785,7 +671,6 @@ void Application::createIndexBuffers(engine::scene::prop& res, bool verbose)
 	const vk::DeviceSize size = sizeof(res.mesh.indices[0]) * res.mesh.indices.size();
 
 	auto&& [stagingBuffer, stagingBufferMemory] = createBuffer(
-			environment,
 			size,
 			vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -795,7 +680,6 @@ void Application::createIndexBuffers(engine::scene::prop& res, bool verbose)
 	stagingBufferMemory.unmapMemory();
 
 	auto&& buffers = createBuffer(
-			environment,
 			size,
 			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -804,23 +688,76 @@ void Application::createIndexBuffers(engine::scene::prop& res, bool verbose)
 	res.geom_buffer.index_buffer_memory = std::move(buffers.second);
 
 	copyBuffer(
-			environment,
-			commandPool,
 			stagingBuffer,
 			res.geom_buffer.index_buffer,
 			size);
 }
 
+void Application::createSkybox()
+{
+	vk::raii::Image img = nullptr;
+	vk::raii::DeviceMemory mem = nullptr;
+
+	vk::ImageCreateInfo ici(
+			{},
+			vk::ImageType::e2D,
+			vk::Format::eR8G8B8A8Srgb,
+			{ 900, 900, 1 },
+			1,
+			6,
+			vk::SampleCountFlagBits::e1,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+			vk::SharingMode::eExclusive,
+			{},
+			vk::ImageLayout::eUndefined);
+	img = _device.createImage(ici);
+
+	vk::ImageMemoryRequirementsInfo2 imri(*img);
+	vk::MemoryRequirements2 memRequirements = _device.getImageMemoryRequirements2(imri);
+
+	vk::MemoryAllocateInfo allocInfo(
+			memRequirements.memoryRequirements.size,
+			findMemoryType(
+					memRequirements.memoryRequirements.memoryTypeBits,
+					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent));
+	mem = _device.allocateMemory(allocInfo);
+
+	vk::BindImageMemoryInfo bimi(*img, *mem, 0);
+	_device.bindImageMemory2(bimi);
+
+	vk::ImageViewCreateInfo ivci(
+		{},
+		*img,
+		vk::ImageViewType::eCubeArray,
+		vk::Format::eR8G8B8A8Srgb,
+		vk::ComponentMapping{},
+		vk::ImageSubresourceRange(
+			vk::ImageAspectFlagBits::eColor,
+			0,
+			1,
+			0,
+			6));
+	vk::raii::ImageView view = _device.createImageView(ivci);
+
+	vk::SamplerCreateInfo sci(
+		{},
+		vk::Filter::eNearest,
+		vk::Filter::eNearest,
+		vk::SamplerMipmapMode::eNearest,
+		vk::SamplerAddressMode::eRepeat,
+		vk::SamplerAddressMode::eRepeat,
+		vk::SamplerAddressMode::eRepeat);
+	vk::raii::Sampler sampler = _device.createSampler(sci);
+}
+
 void Application::createUniformBuffers(bool verbose)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-
 	// view_projection
 	{
 		const vk::DeviceSize size = sizeof(view_projection);
 
 		auto&& buffers = createBuffer(
-				environment,
 				size,
 				vk::BufferUsageFlagBits::eUniformBuffer,
 				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -831,12 +768,11 @@ void Application::createUniformBuffers(bool verbose)
 
 	// light_sources
 	{
-		const vk::DeviceSize alignment = phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
+		const vk::DeviceSize alignment = _phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
 		const vk::DeviceSize padded_size = (sizeof(engine::lights::point_lights_t) / alignment + 1) * alignment;
 		const vk::DeviceSize size = padded_size + sizeof(engine::lights::spot_lights_t);
 
 		auto&& buffers = createBuffer(
-				environment,
 				size,
 				vk::BufferUsageFlagBits::eUniformBuffer,
 				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -849,7 +785,6 @@ void Application::createUniformBuffers(bool verbose)
 	const vk::DeviceSize size = props.size() * sizeof(glm::mat4);
 
 	auto&& buffers = createBuffer(
-			environment,
 			size,
 			vk::BufferUsageFlagBits::eUniformBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -860,8 +795,6 @@ void Application::createUniformBuffers(bool verbose)
 
 void Application::createDescriptorPool(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
 	std::vector<vk::DescriptorPoolSize> poolSizes = {
 			{ vk::DescriptorType::eUniformBuffer,        (uint32_t)(3 * maxFrames + maxFrames * props.size())},
 			{ vk::DescriptorType::eCombinedImageSampler, (uint32_t)(maxFrames * props.size())},
@@ -873,13 +806,11 @@ void Application::createDescriptorPool(bool verbose)
 
 	vk::DescriptorPoolCreateInfo dpci(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, maxFrames * (1 + props.size()), poolSizes);
 
-	descriptorPool = device.createDescriptorPool(dpci);
+	descriptorPool = _device.createDescriptorPool(dpci);
 }
 
 void Application::createImguiDescriptorPool(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
 	std::vector<vk::DescriptorPoolSize> poolSizes = {
 			{ vk::DescriptorType::eUniformBuffer,        1000},
 			{ vk::DescriptorType::eCombinedImageSampler, 1000},
@@ -896,42 +827,35 @@ void Application::createImguiDescriptorPool(bool verbose)
 
 	vk::DescriptorPoolCreateInfo dpci(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,  1000, poolSizes);
 
-	ImguiDescriptorPool = device.createDescriptorPool(dpci);
+	ImguiDescriptorPool = _device.createDescriptorPool(dpci);
 }
 
 void Application::createDescriptorSets(bool verbose)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-	const vk::raii::Device& device = environment.device();
-
-	std::vector<vk::DescriptorSetLayout> counts(maxFrames, *scenewise_descriptor_set_layout);
+	std::vector<vk::DescriptorSetLayout> counts(1, *_scenewise_descriptor_set_layout);
 	vk::DescriptorSetAllocateInfo dsai(*descriptorPool, counts);
 
-	scenewise_descriptor_sets = device.allocateDescriptorSets(dsai);
+	_scenewise_descriptor_set = std::move(_device.allocateDescriptorSets(dsai).front());
 
-	counts = std::vector<vk::DescriptorSetLayout>(maxFrames * props.size(), *objectwise_descriptor_set_layout);
+	counts = std::vector<vk::DescriptorSetLayout>(props.size(), *_objectwise_descriptor_set_layout);
 	dsai = vk::DescriptorSetAllocateInfo(*descriptorPool, counts);
 
-	objectwise_descriptor_sets = device.allocateDescriptorSets(dsai);
+	objectwise_descriptor_sets = _device.allocateDescriptorSets(dsai);
 
 	vk::DescriptorBufferInfo view_projection_info(*view_projection_buffer, 0, sizeof(view_projection));
 	vk::DescriptorBufferInfo point_lights_info(*light_sources_buffer, 0, sizeof(engine::lights::point_lights_t));
 
-	const vk::DeviceSize alignment = phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
+	const vk::DeviceSize alignment = _phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
 	const vk::DeviceSize padded_size = (sizeof(engine::lights::point_lights_t) / alignment + 1) * alignment;
 	vk::DescriptorBufferInfo spot_lights_info(*light_sources_buffer, padded_size, sizeof(engine::lights::spot_lights_t));
 
 	std::vector<vk::WriteDescriptorSet> writes = {
-			{*scenewise_descriptor_sets[0], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, view_projection_info},
-			{*scenewise_descriptor_sets[0], 1, 0, vk::DescriptorType::eUniformBuffer, nullptr, point_lights_info},
-			{*scenewise_descriptor_sets[0], 2, 0, vk::DescriptorType::eUniformBuffer, nullptr, spot_lights_info},
-
-			{*scenewise_descriptor_sets[1], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, view_projection_info},
-			{*scenewise_descriptor_sets[1], 1, 0, vk::DescriptorType::eUniformBuffer, nullptr, point_lights_info},
-			{*scenewise_descriptor_sets[1], 2, 0, vk::DescriptorType::eUniformBuffer, nullptr, spot_lights_info},
+			{*_scenewise_descriptor_set, 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, view_projection_info},
+			{*_scenewise_descriptor_set, 1, 0, vk::DescriptorType::eUniformBuffer, nullptr, point_lights_info},
+			{*_scenewise_descriptor_set, 2, 0, vk::DescriptorType::eUniformBuffer, nullptr, spot_lights_info},
 	};
 
-	device.updateDescriptorSets(writes, {});
+	_device.updateDescriptorSets(writes, {});
 
 	for (int i = 0; i < props.size(); i++)
 	{
@@ -944,120 +868,396 @@ void Application::createDescriptorSets(bool verbose)
 		vk::DescriptorImageInfo ao_info(*props[i].ambient_occlusion.sampler, *props[i].ambient_occlusion.image_view, vk::ImageLayout::eShaderReadOnlyOptimal);
 
 		std::vector<vk::WriteDescriptorSet> descriptorWrites = {
-				{*objectwise_descriptor_sets[2 * i + 0], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, model_info},
-				{*objectwise_descriptor_sets[2 * i + 0], 1, 0, vk::DescriptorType::eCombinedImageSampler, texture_info},
-				{*objectwise_descriptor_sets[2 * i + 0], 2, 0, vk::DescriptorType::eCombinedImageSampler, normal_info},
-				{*objectwise_descriptor_sets[2 * i + 0], 3, 0, vk::DescriptorType::eCombinedImageSampler, roughness_info},
-				{*objectwise_descriptor_sets[2 * i + 0], 4, 0, vk::DescriptorType::eCombinedImageSampler, metallic_info},
-				{*objectwise_descriptor_sets[2 * i + 0], 5, 0, vk::DescriptorType::eCombinedImageSampler, ao_info},
-
-				{*objectwise_descriptor_sets[2 * i + 1], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, model_info},
-				{*objectwise_descriptor_sets[2 * i + 1], 1, 0, vk::DescriptorType::eCombinedImageSampler, texture_info},
-				{*objectwise_descriptor_sets[2 * i + 1], 2, 0, vk::DescriptorType::eCombinedImageSampler, normal_info},
-				{*objectwise_descriptor_sets[2 * i + 1], 3, 0, vk::DescriptorType::eCombinedImageSampler, roughness_info},
-				{*objectwise_descriptor_sets[2 * i + 1], 4, 0, vk::DescriptorType::eCombinedImageSampler, metallic_info},
-				{*objectwise_descriptor_sets[2 * i + 1], 5, 0, vk::DescriptorType::eCombinedImageSampler, ao_info},
+				{*objectwise_descriptor_sets[i], 0, 0, vk::DescriptorType::eUniformBuffer, nullptr, model_info},
+				{*objectwise_descriptor_sets[i], 1, 0, vk::DescriptorType::eCombinedImageSampler, texture_info},
+				{*objectwise_descriptor_sets[i], 2, 0, vk::DescriptorType::eCombinedImageSampler, normal_info},
+				{*objectwise_descriptor_sets[i], 3, 0, vk::DescriptorType::eCombinedImageSampler, roughness_info},
+				{*objectwise_descriptor_sets[i], 4, 0, vk::DescriptorType::eCombinedImageSampler, metallic_info},
+				{*objectwise_descriptor_sets[i], 5, 0, vk::DescriptorType::eCombinedImageSampler, ao_info},
 		};
 
-		device.updateDescriptorSets(descriptorWrites, {});
+		_device.updateDescriptorSets(descriptorWrites, {});
 	}
 }
 
 void Application::createCommandBuffers(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
-	vk::CommandBufferAllocateInfo cbai(*commandPool, vk::CommandBufferLevel::ePrimary, maxFrames);
-	commandBuffers = device.allocateCommandBuffers(cbai);
+	vk::CommandBufferAllocateInfo cbai(*_cmd_pool, vk::CommandBufferLevel::ePrimary, maxFrames);
+	commandBuffers = _device.allocateCommandBuffers(cbai);
 }
 
 void Application::createSyncObjects(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
 	vk::SemaphoreCreateInfo sci;
 
 	vk::FenceCreateInfo fci(vk::FenceCreateFlagBits::eSignaled);
 
 	for (int i = 0; i < maxFrames; i++)
 	{
-		imageAvailableSemaphores.push_back(device.createSemaphore(sci));
-		renderFinishedSemaphores.push_back(device.createSemaphore(sci));
-		isFlightFences.push_back(device.createFence(fci));
-
+		imageAvailableSemaphores.push_back(_device.createSemaphore(sci));
+		renderFinishedSemaphores.push_back(_device.createSemaphore(sci));
+		isFlightFences.push_back(_device.createFence(fci));
 	}
 }
 
 void Application::recreateSwapChain(bool verbose)
 {
-	const vk::raii::Device& device = environment.device();
-
-	vk::Extent2D ext = window.framebuffer_size();
+	vk::Extent2D ext = _window.framebuffer_size();
 	while (ext.height == 0 || ext.width == 0)
 	{
-		ext = window.framebuffer_size();
+		ext = _window.framebuffer_size();
 		glfw::window::wait_events();
 	}
 
-	device.waitIdle();
+	_device.waitIdle();
 
-	framebuffers.clear();
-	imageViews.clear();
-	swapchain = nullptr;
+	_framebuffer.clear();
+	_sc_image_views.clear();
+	_swapchain = nullptr;
 
-	createSwapChain();
-	createImageViews();
+	initSwapchain();
 	createDepthResources();
 	createFramebuffers();
 }
 
 
+void Application::show_meshes()
+{
+
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(0);
+	ImGui::AlignTextToFramePadding();
+	bool node_open = ImGui::TreeNode("Meshes");
+
+	if (!node_open)
+		return;
+
+	for (int i = 0; i < scene.props.size(); i++)
+	{
+		ImGui::PushID(i);
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		bool leaf_open = ImGui::TreeNode("Meshes", "%s %d", "Mesh", i + 1);
+
+		if (!leaf_open)
+		{
+			ImGui::NextColumn();
+			ImGui::PopID();
+			continue;
+		}
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGuiTreeNodeFlags property_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+
+		ImGui::TreeNodeEx("Translation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::InputFloat3("##trans", (float*)&props[i].trans);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Angles", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::InputFloat3("##angles", (float*)&props[i].angles);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Scale", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::InputFloat("##scale", &props[i].scale);
+		ImGui::NextColumn();
+
+		ImGui::TreePop();
+		ImGui::PopID();
+	}
+
+	ImGui::TreePop();
+}
+
+void Application::show_point_lights()
+{
+
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(0);
+	ImGui::AlignTextToFramePadding();
+	bool node_open = ImGui::TreeNode("Point Lights");
+
+	if (!node_open)
+		return;
+
+	for (int i = 0; i < scene.lights.point_lights.n_lights; i++)
+	{
+		ImGui::PushID(i);
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		bool leaf_open = ImGui::TreeNode("Point Light", "%s %d", "Point Light", i + 1);
+
+		if (!leaf_open)
+		{
+			ImGui::NextColumn();
+			ImGui::PopID();
+			continue;
+		}
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGuiTreeNodeFlags property_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+
+		ImGui::TreeNodeEx("Position", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::DragFloat3("##position", (float*)&scene.lights.point_lights.lights[i].position, 0.1f, -5.0f, 5.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Color", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGuiColorEditFlags flags1 = ImGuiColorEditFlags_Float | ImGuiColorEditFlags_InputRGB;
+		ImGui::ColorEdit3("##color", (float*)&scene.lights.point_lights.lights[i].color, flags1);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Intensity", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##intensity", (float*)&scene.lights.point_lights.lights[i].intensity, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Constant Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##constant", &scene.lights.point_lights.lights[i].constant, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Linear Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##linear", &scene.lights.point_lights.lights[i].linear, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Quadratic Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##quadratic", &scene.lights.point_lights.lights[i].quadratic, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TreePop();
+		ImGui::PopID();
+	}
+
+	ImGui::TreePop();
+}
+
+void Application::show_spot_lights()
+{
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(0);
+	ImGui::AlignTextToFramePadding();
+	bool node_open = ImGui::TreeNode("Spot Lights");
+
+	if (!node_open)
+		return;
+
+	for (int i = 0; i < scene.lights.spot_lights.n_lights; i++)
+	{
+		ImGui::PushID(i);
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		bool leaf_open = ImGui::TreeNode("Spot Light", "%s %d", "Spot Light", i + 1);
+
+		if (!leaf_open)
+		{
+			ImGui::NextColumn();
+			ImGui::PopID();
+			continue;
+		}
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGuiTreeNodeFlags property_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+
+		ImGui::TreeNodeEx("Position", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::DragFloat3("##position", (float*)&scene.lights.spot_lights.lights[i].position, 0.1f, -5.0f, 5.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Direction", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::DragFloat3("##direction", (float*)&scene.lights.spot_lights.lights[i].direction, 0.1f, -5.0f, 5.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Width", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::DragFloat("##width", &scene.lights.spot_lights.lights[i].cone_size, 0.01f, 0.3f, 0.99f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Color", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGuiColorEditFlags flags1 = ImGuiColorEditFlags_Float | ImGuiColorEditFlags_InputRGB;
+		ImGui::ColorEdit3("##color", (float*)&scene.lights.spot_lights.lights[i].color, flags1);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Intensity", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::DragFloat("##intensity", &scene.lights.spot_lights.lights[i].intensity, 0.01f, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Constant Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##constant", &scene.lights.spot_lights.lights[i].constant, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Linear Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##linear", &scene.lights.spot_lights.lights[i].linear, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TableNextRow();
+		ImGui::TableSetColumnIndex(0);
+		ImGui::AlignTextToFramePadding();
+		ImGui::TreeNodeEx("Quadratic Attenuation", property_flags);
+		ImGui::TableSetColumnIndex(1);
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::SliderFloat("##quadratic", &scene.lights.spot_lights.lights[i].quadratic, 0.0f, 10.0f);
+		ImGui::NextColumn();
+
+		ImGui::TreePop();
+		ImGui::PopID();
+	}
+
+	ImGui::TreePop();
+}
+
+void Application::show_control_window()
+{
+	IM_ASSERT(ImGui::GetCurrentContext() != NULL && "Missing dear imgui context. Refer to examples app!");
+
+	ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
+
+	const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(main_viewport->Size.x / 3.5f, main_viewport->Size.y), ImGuiCond_Always);
+
+	if (!ImGui::Begin("Control", NULL, flags))
+	{
+		ImGui::End();
+		return;
+	}
+
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
+	if (ImGui::BeginTable("split", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_Resizable))
+	{
+		show_meshes();
+		show_point_lights();
+		show_spot_lights();
+		ImGui::EndTable();
+	}
+	ImGui::PopStyleVar();
+	ImGui::End();
+}
+
+
 void Application::drawFrame()
 {
-	const vk::raii::Device& device = environment.device();
-	const vk::raii::Queue& graphics_queue = environment.graphics_queue();
-	const vk::raii::Queue& present_queue = environment.present_queue();
-
 	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 	ImGui::NewFrame();
 
 	if (isMenuShowing)
-		ImGui::ShowDemoWindow();
+	{
+		show_control_window();
+//		ImGui::ShowDemoWindow();
+	}
+
 
 	ImGui::Render();
 
-	glfw::key_action action = window.get_key(glfw::key_id::A);
+	glfw::key_action action = _window.get_key(glfw::key_id::A);
 	if (action == glfw::key_action::press)
 	{
 		cam.position -= cam.right / 30.0f;
 	}
-	action = window.get_key(glfw::key_id::D);
+	action = _window.get_key(glfw::key_id::D);
 	if (action == glfw::key_action::press)
 	{
 		cam.position += cam.right / 30.0f;
 	}
-	action = window.get_key(glfw::key_id::W);
+	action = _window.get_key(glfw::key_id::W);
 	if (action == glfw::key_action::press)
 	{
 		cam.position += cam.fwd / 30.0f;
 	}
-	action = window.get_key(glfw::key_id::S);
+	action = _window.get_key(glfw::key_id::S);
 	if (action == glfw::key_action::press)
 	{
 		cam.position -= cam.fwd / 30.0f;
 	}
-	action = window.get_key(glfw::key_id::escape);
+	action = _window.get_key(glfw::key_id::escape);
 	if (action == glfw::key_action::press)
 	{
 		if (!lockChange && !isMenuShowing)
 		{
-			window.set_input_mode(GLFW_CURSOR_NORMAL);
+			_window.set_input_mode(GLFW_CURSOR_NORMAL);
 			isMenuShowing = true;
 		}
 		else if (!lockChange)
 		{
-			window.set_input_mode(GLFW_CURSOR_DISABLED);
+			_window.set_input_mode(GLFW_CURSOR_DISABLED);
 			isMenuShowing = false;
 		}
 		lockChange = true;
@@ -1067,12 +1267,12 @@ void Application::drawFrame()
 		lockChange = false;
 	}
 
-	vk::Result result = device.waitForFences(*isFlightFences[currentFrame], true, UINT64_MAX);
+	vk::Result result = _device.waitForFences(*isFlightFences[currentFrame], true, UINT64_MAX);
 	resultCheck(result, "Fence checker");
 
 	uint32_t imgIndex;
-	vk::AcquireNextImageInfoKHR anii(*swapchain, UINT64_MAX, *imageAvailableSemaphores[currentFrame], {}, 1);
-	auto tmp = device.acquireNextImage2KHR(anii);
+	vk::AcquireNextImageInfoKHR anii(*_swapchain, UINT64_MAX, *imageAvailableSemaphores[currentFrame], {}, 1);
+	auto tmp = _device.acquireNextImage2KHR(anii);
 	result = tmp.first;
 	if (result == vk::Result::eErrorOutOfDateKHR || frameBufferResized)
 	{
@@ -1080,7 +1280,7 @@ void Application::drawFrame()
 		recreateSwapChain();
 		return;
 	}
-	device.resetFences(*isFlightFences[currentFrame]);
+	_device.resetFences(*isFlightFences[currentFrame]);
 	imgIndex = tmp.second;
 
 	commandBuffers[currentFrame].reset();
@@ -1095,14 +1295,14 @@ void Application::drawFrame()
 
 	updateUniformBuffer(currentFrame);
 
-	graphics_queue.submit(si, *isFlightFences[currentFrame]);
+	_graphics_queue.vk_queue().submit(si, *isFlightFences[currentFrame]);
 
 
-	vk::PresentInfoKHR pi(*renderFinishedSemaphores[currentFrame], *swapchain, imgIndex);
+	vk::PresentInfoKHR pi(*renderFinishedSemaphores[currentFrame], *_swapchain, imgIndex);
 
 	try
 	{
-		present_queue.presentKHR(pi);
+		_present_queue.vk_queue().presentKHR(pi);
 		currentFrame = (currentFrame + 1) % maxFrames;
 	}
 	catch (...)
@@ -1111,8 +1311,6 @@ void Application::drawFrame()
 		recreateSwapChain();
 		currentFrame = (currentFrame + 1) % maxFrames;
 	}
-
-	//currentFrame = (currentFrame + 1) % maxFrames;
 }
 
 void Application::recordCommandBuffer(const vk::raii::CommandBuffer& buffer, uint32_t imgIndex) const
@@ -1125,23 +1323,24 @@ void Application::recordCommandBuffer(const vk::raii::CommandBuffer& buffer, uin
 	clearColors[0].color = clr;
 	clearColors[1].depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
 	vk::RenderPassBeginInfo rpbi(
-			*renderPass,
-			*framebuffers[imgIndex],
-			{{ 0, 0 }, scImageExtent },
+			*_render_pass,
+			*_framebuffer[imgIndex],
+			{{ 0, 0 }, _sc_extent },
 			clearColors);
 	buffer.beginRenderPass(rpbi, vk::SubpassContents::eInline);
 	{
-		buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipelines[0]);
+		buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, _pbr_pipeline->pipeline());
+
 		vk::Viewport vp(
 				0.0f, 0.0f,
-				static_cast<float>(scImageExtent.width), static_cast<float>(scImageExtent.height), 0.0f,
+				static_cast<float>(_sc_extent.width), static_cast<float>(_sc_extent.height), 0.0f,
 				1.0f);
 		buffer.setViewport(0, vp);
 
-		vk::Rect2D sc({ 0, 0 }, scImageExtent);
+		vk::Rect2D sc({ 0, 0 }, _sc_extent);
 		buffer.setScissor(0, sc);
 
-		buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0, *scenewise_descriptor_sets[currentFrame], {});
+		buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pbr_pipeline->layout(), 0, *_scenewise_descriptor_set, {});
 
 		for (int i = 0; i < props.size(); i++)
 		{
@@ -1149,7 +1348,7 @@ void Application::recordCommandBuffer(const vk::raii::CommandBuffer& buffer, uin
 			buffer.bindVertexBuffers(0, *props[i].geom_buffer.vertex_buffer, ds);
 			buffer.bindIndexBuffer(*props[i].geom_buffer.index_buffer, 0, vk::IndexType::eUint32);
 
-			buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 1, *objectwise_descriptor_sets[2 * i + currentFrame], {});
+			buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, _pbr_pipeline->layout(), 1, *objectwise_descriptor_sets[i], {});
 
 			buffer.drawIndexed(props[i].mesh.indices.size(), 1, 0, 0, 0);
 		}
@@ -1162,8 +1361,6 @@ void Application::recordCommandBuffer(const vk::raii::CommandBuffer& buffer, uin
 
 void Application::updateUniformBuffer(uint32_t currentImage)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-
 	static auto startTime = std::chrono::high_resolution_clock::now();
 
 	auto currentTime = std::chrono::high_resolution_clock::now();
@@ -1173,16 +1370,27 @@ void Application::updateUniformBuffer(uint32_t currentImage)
 
 	view_proj.view = cam.view();
 	view_proj.projection = glm::perspective(
-			glm::radians(60.0f), scImageExtent.width / float(scImageExtent.height), 0.1f, 400.0f);
+			glm::radians(60.0f), _sc_extent.width / float(_sc_extent.height), 0.1f, 400.0f);
 	view_proj.projection[1][1] *= -1;
 	view_proj.camPos = cam.position;
 
 	glm::mat4 r = glm::mat4(1.0f);
-	r = glm::rotate(r, glm::radians(2.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	scene.lights.point_lights.lights[0].position = r * scene.lights.point_lights.lights[0].position;
+//	r = glm::rotate(r, glm::radians(2.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	scene.lights.point_lights.lights[0].position = r * glm::vec4(scene.lights.point_lights.lights[0].position, 1.0f);
 
 	scene.lights.spot_lights.lights[0].position = glm::vec4(cam.position, 0.0f);
 	scene.lights.spot_lights.lights[0].direction = glm::normalize(glm::vec4(cam.fwd, 0.0f));
+
+	for (engine::scene::prop& p : props)
+	{
+		p.model = glm::mat4(1.0f);
+		p.model = glm::translate(p.model, p.trans);
+		p.model = glm::scale(p.model, glm::vec3(p.scale));
+		p.model = glm::rotate(p.model, glm::radians(p.angles.x), glm::vec3(1.0f, 0.0f, 0.0f));
+		p.model = glm::rotate(p.model, glm::radians(p.angles.y), glm::vec3(0.0f, 1.0f, 0.0f));
+		p.model = glm::rotate(p.model, glm::radians(p.angles.z), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	}
 
 	// view_projeciton
 	{
@@ -1197,7 +1405,7 @@ void Application::updateUniformBuffer(uint32_t currentImage)
 		std::memcpy(data, &scene.lights.point_lights, sizeof(engine::lights::point_lights_t));
 		light_sources_buffer_memory.unmapMemory();
 
-		const vk::DeviceSize alignment = phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
+		const vk::DeviceSize alignment = _phys_device.getProperties().limits.minUniformBufferOffsetAlignment;
 		const vk::DeviceSize padded_size = (sizeof(engine::lights::point_lights_t) / alignment + 1) * alignment;
 		data = light_sources_buffer_memory.mapMemory(padded_size, sizeof(engine::lights::spot_lights_t));
 		std::memcpy(data, &scene.lights.spot_lights, sizeof(engine::lights::spot_lights_t));
@@ -1220,45 +1428,13 @@ void Application::updateUniformBuffer(uint32_t currentImage)
 
 void Application::run()
 {
-	const vk::raii::Device& device = environment.device();
-
-	//window.set_close(true);
-	while (!window.should_close())
+	while (!_window.should_close())
 	{
 		glfw::window::poll_events();
 		drawFrame();
 	}
 
-	device.waitIdle();
-}
-
-
-vk::raii::PhysicalDevice
-Application::pickDevice(const std::vector<vk::raii::PhysicalDevice>& devices)
-{
-	if (devices.empty())
-	{
-		throw std::runtime_error("No GPUs present!");
-	}
-
-	return devices[0];
-}
-
-
-Application::SwapChainSupportDetails
-Application::querySupport(const vk_utils::environment& environment)
-{
-	Application::SwapChainSupportDetails details{};
-
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-	const vk::raii::SurfaceKHR& surface = environment.surface(0);
-
-	details.capabilities = phys_device.getSurfaceCapabilitiesKHR(*surface);
-	details.formats = phys_device.getSurfaceFormatsKHR(*surface);
-	details.presentModes = phys_device.getSurfacePresentModesKHR(*surface);
-
-
-	return details;
+	_device.waitIdle();
 }
 
 std::pair<vk::Format, vk::ColorSpaceKHR>
@@ -1274,22 +1450,12 @@ vk::PresentModeKHR
 Application::pickPresentMode(const Application::SwapChainSupportDetails& details)
 {
 	return vk::PresentModeKHR::eFifo;
-
-	if (std::find(details.presentModes.begin(), details.presentModes.end(), vk::PresentModeKHR::eMailbox)
-	    != details.presentModes.end())
-	{
-		return vk::PresentModeKHR::eMailbox;
-	}
-
 }
 
 
-uint32_t
-Application::findMemoryType(const vk_utils::environment& environment, uint32_t filter, vk::MemoryPropertyFlags properties)
+uint32_t Application::findMemoryType(uint32_t filter, vk::MemoryPropertyFlags properties)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-
-	vk::PhysicalDeviceMemoryProperties mp = phys_device.getMemoryProperties();
+	vk::PhysicalDeviceMemoryProperties mp = _phys_device.getMemoryProperties();
 	for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
 	{
 		if (filter & (1 << i) && (mp.memoryTypes[i].propertyFlags & properties) == properties)
@@ -1302,16 +1468,13 @@ Application::findMemoryType(const vk_utils::environment& environment, uint32_t f
 }
 
 vk::Format Application::findSupportedFormat(
-		const vk_utils::environment& environment,
 		const std::vector<vk::Format>& candidates,
 		vk::ImageTiling tiling,
 		vk::FormatFeatureFlags features)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-
 	for (vk::Format format: candidates)
 	{
-		vk::FormatProperties props = phys_device.getFormatProperties(format);
+		vk::FormatProperties props = _phys_device.getFormatProperties(format);
 
 		if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features
 		    || tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features)
@@ -1323,43 +1486,37 @@ vk::Format Application::findSupportedFormat(
 	throw std::runtime_error("failed to find supported format!");
 }
 
-vk::Format Application::findDepthFormat(const vk_utils::environment& environment)
+vk::Format Application::findDepthFormat()
 {
 	return findSupportedFormat(
-			environment,
 			{ vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
 			vk::ImageTiling::eOptimal,
 			vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 }
 
 
-vk::raii::ShaderModule
-Application::createShader(const vk_utils::environment& environment, const std::vector<uint32_t>& code)
+vk::raii::ShaderModule Application::createShader(const std::vector<uint32_t>& code)
 {
-	const vk::raii::Device& device = environment.device();
-
 	vk::ShaderModuleCreateInfo smci(
 			{},
 			4 * code.size(),
 			code.data());
 
-	return device.createShaderModule(smci);
+	return _device.createShaderModule(smci);
 }
 
 std::pair<vk::raii::Buffer, vk::raii::DeviceMemory>
-Application::createBuffer(const vk_utils::environment& environment, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
+Application::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
 {
-	const vk::raii::Device& device = environment.device();
-
 	vk::raii::Buffer resBuf = nullptr;
 	vk::raii::DeviceMemory resBufMem = nullptr;
 	vk::BufferCreateInfo bci({}, size, usage, vk::SharingMode::eExclusive);
-	resBuf = vk::raii::Buffer(device, bci);
+	resBuf = _device.createBuffer(bci);
 
 	vk::MemoryRequirements mr = resBuf.getMemoryRequirements();
 
-	vk::MemoryAllocateInfo mai(mr.size, findMemoryType(environment, mr.memoryTypeBits, properties));
-	resBufMem = device.allocateMemory(mai);
+	vk::MemoryAllocateInfo mai(mr.size, findMemoryType(mr.memoryTypeBits, properties));
+	resBufMem = _device.allocateMemory(mai);
 
 	resBuf.bindMemory(*resBufMem, 0);
 
@@ -1368,7 +1525,6 @@ Application::createBuffer(const vk_utils::environment& environment, vk::DeviceSi
 
 std::pair<vk::raii::Image, vk::raii::DeviceMemory>
 Application::createImage(
-		const vk_utils::environment& environment,
 		uint32_t width,
 		uint32_t height,
 		uint32_t mipLevels,
@@ -1377,8 +1533,6 @@ Application::createImage(
 		vk::ImageUsageFlags usage,
 		vk::MemoryPropertyFlags properties)
 {
-	const vk::raii::Device& device = environment.device();
-
 	vk::raii::Image img = nullptr;
 	vk::raii::DeviceMemory mem = nullptr;
 
@@ -1395,21 +1549,20 @@ Application::createImage(
 			vk::SharingMode::eExclusive,
 			{},
 			vk::ImageLayout::eUndefined);
-	img = device.createImage(ici);
+	img = _device.createImage(ici);
 
-	vk::DeviceImageMemoryRequirements dimr(&ici);
-	vk::MemoryRequirements2 memRequirements = device.getImageMemoryRequirements(dimr);
+	vk::ImageMemoryRequirementsInfo2 imri(*img);
+	vk::MemoryRequirements2 memRequirements = _device.getImageMemoryRequirements2(imri);
 
 	vk::MemoryAllocateInfo allocInfo(
 			memRequirements.memoryRequirements.size,
 			findMemoryType(
-					environment,
 					memRequirements.memoryRequirements.memoryTypeBits,
 					properties));
-	mem = device.allocateMemory(allocInfo);
+	mem = _device.allocateMemory(allocInfo);
 
 	vk::BindImageMemoryInfo bimi(*img, *mem, 0);
-	device.bindImageMemory2(bimi);
+	_device.bindImageMemory2(bimi);
 
 	return { std::move(img), std::move(mem) };
 }
@@ -1437,14 +1590,11 @@ Application::readFile(const std::string& filename)
 }
 
 
-vk::raii::CommandBuffer
-Application::beginSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandPool& cmd_pool)
+vk::raii::CommandBuffer Application::beginSingleTimeCommands()
 {
-	const vk::raii::Device& device = environment.device();
+	vk::CommandBufferAllocateInfo cbai(*_cmd_pool, vk::CommandBufferLevel::ePrimary, 1);
 
-	vk::CommandBufferAllocateInfo cbai(*cmd_pool, vk::CommandBufferLevel::ePrimary, 1);
-
-	vk::raii::CommandBuffer cb = std::move(device.allocateCommandBuffers(cbai)[0]);
+	vk::raii::CommandBuffer cb = std::move(_device.allocateCommandBuffers(cbai)[0]);
 
 	vk::CommandBufferBeginInfo cbbi(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
 	cb.begin(cbbi);
@@ -1452,60 +1602,52 @@ Application::beginSingleTimeCommands(const vk_utils::environment& environment, c
 	return cb;
 }
 
-void
-Application::endSingleTimeCommands(const vk_utils::environment& environment, const vk::raii::CommandBuffer& buffer)
+void Application::endSingleTimeCommands(const vk::raii::CommandBuffer& cmd)
 {
-	const vk::raii::Queue& graphics_queue = environment.graphics_queue();
-	buffer.end();
+	cmd.end();
 
-	vk::SubmitInfo si({}, {}, *buffer);
-	graphics_queue.submit(si);
-	graphics_queue.waitIdle();
+	vk::SubmitInfo si({}, {}, *cmd);
+	_graphics_queue.vk_queue().submit(si);
+	_graphics_queue.vk_queue().waitIdle();
 }
 
 
-void
-Application::copyBuffer(const vk_utils::environment& environment, const vk::raii::CommandPool& cmd_pool, const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, vk::DeviceSize size)
+void Application::copyBuffer(const vk::raii::Buffer& srcBuffer, const vk::raii::Buffer& dstBuffer, vk::DeviceSize size)
 {
-	vk::raii::CommandBuffer cb = beginSingleTimeCommands(environment, cmd_pool);
+	vk::raii::CommandBuffer cb = beginSingleTimeCommands();
 
 	vk::BufferCopy bc(0, 0, size);
 	cb.copyBuffer(*srcBuffer, *dstBuffer, bc);
 
-	endSingleTimeCommands(environment, cb);
+	endSingleTimeCommands(cb);
 }
 
 void
 Application::copyBufferToImage(
-		const vk_utils::environment& environment,
-		const vk::raii::CommandPool& cmd_pool,
-		vk::Buffer buffer,
-		vk::Image image,
+		const vk::raii::Buffer& buffer,
+		const vk::raii::Image& image,
 		uint32_t width,
 		uint32_t height)
 {
-	vk::raii::CommandBuffer cb = beginSingleTimeCommands(environment, cmd_pool);
+	vk::raii::CommandBuffer cb = beginSingleTimeCommands();
 
 	vk::BufferImageCopy bic(
 			0, 0, 0, { vk::ImageAspectFlagBits::eColor, 0, 0, 1 }, { 0, 0, 0 }, { width, height, 1 });
 
-	cb.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, bic);
+	cb.copyBufferToImage(*buffer, *image, vk::ImageLayout::eTransferDstOptimal, bic);
 
-	endSingleTimeCommands(environment, cb);
+	endSingleTimeCommands(cb);
 }
 
 
-void
-Application::transitionImageLayout(
-		const vk_utils::environment& environment,
-		const vk::raii::CommandPool& cmd_pool,
+void Application::transitionImageLayout(
 		vk::Image image,
 		vk::Format format,
 		vk::ImageLayout oldLayout,
 		vk::ImageLayout newLayout,
 		uint32_t mipLevels)
 {
-	vk::raii::CommandBuffer cb = beginSingleTimeCommands(environment, cmd_pool);
+	vk::raii::CommandBuffer cb = beginSingleTimeCommands();
 
 	vk::ImageMemoryBarrier barrier(
 			{}, {}, oldLayout, newLayout, VK_QUEUE_FAMILY_IGNORED,
@@ -1563,28 +1705,24 @@ Application::transitionImageLayout(
 
 	cb.pipelineBarrier(srcStage, dstStage, {}, {}, {}, barrier);
 
-	endSingleTimeCommands(environment, cb);
+	endSingleTimeCommands(cb);
 }
 
 void
 Application::generateMipmaps(
-		const vk_utils::environment& environment,
-		const vk::raii::CommandPool& cmd_pool,
 		vk::Image img,
 		vk::Format imageFormat,
 		int32_t texW,
 		int32_t texH,
 		uint32_t mipLevels)
 {
-	const vk::raii::PhysicalDevice& phys_device = environment.phys_device();
-
-	vk::FormatProperties propertiess = phys_device.getFormatProperties(imageFormat);
+	vk::FormatProperties propertiess = _phys_device.getFormatProperties(imageFormat);
 	if (!(propertiess.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear))
 	{
 		throw std::runtime_error("texture image format does not support linear blitting!");
 	}
 
-	vk::raii::CommandBuffer buffer = beginSingleTimeCommands(environment, cmd_pool);
+	vk::raii::CommandBuffer buffer = beginSingleTimeCommands();
 
 	vk::ImageMemoryBarrier barrier(
 			{}, {}, {}, {}, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, img,
@@ -1642,7 +1780,7 @@ Application::generateMipmaps(
 	buffer.pipelineBarrier(
 			vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
 
-	endSingleTimeCommands(environment, buffer);
+	endSingleTimeCommands(buffer);
 }
 
 

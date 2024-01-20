@@ -40,6 +40,9 @@ struct scene
 		engine::texture ambient_occlusion;
 
 		glm::mat4 model = glm::mat4(1.0f);
+		glm::vec3 trans = glm::vec3(0.0f);
+		glm::vec3 angles = glm::vec3(0.0f);
+		float scale = 1.0f;
 	};
 
 	lights lights;

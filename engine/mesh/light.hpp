@@ -15,11 +15,12 @@ namespace gorilla::engine
 
 struct point_light
 {
-	glm::vec4 position = glm::vec4(0.0f);
-	glm::vec4 color = glm::vec4(1.0f);
+	glm::vec3 position = glm::vec3(0.0f);
+	alignas(16) glm::vec3 color = glm::vec3(1.0f);
+	float intensity = 1.0f;
 	float constant = 1.0f;
 	float linear = 0.0f;
-	amongus(8) float quadratic = 0.0f;
+	float quadratic = 0.0f;
 };
 
 struct directional_light
@@ -30,9 +31,10 @@ struct directional_light
 
 struct spot_light
 {
-	alignas(16) glm::vec3 position = glm::vec3(0.0f);
+	glm::vec3 position = glm::vec3(0.0f);
 	alignas(16) glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
-	alignas(16) glm::vec4 color = glm::vec4(1.0f);
+	float intensity = 1.0f;
+	alignas(16) glm::vec3 color = glm::vec3(1.0f);
 	float cone_size = 0.5f;
 
 	float constant = 1.0f;

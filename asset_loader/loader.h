@@ -16,8 +16,8 @@ namespace gorilla::asset_loader
 
 using raw_spirv = std::vector<uint32_t>;
 
-geom::obj load_mesh(const std::string& filename);
-std::vector<geom::obj> load_meshes(const std::vector<std::string>& filenames);
+asset::obj load_mesh(const std::string& filename);
+std::vector<asset::obj> load_meshes(const std::vector<std::string>& filenames);
 
 asset::image load_image(const std::string& filename);
 std::vector<asset::image> load_images(const std::vector<std::string>& filenames);

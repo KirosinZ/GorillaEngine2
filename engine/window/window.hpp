@@ -11,7 +11,8 @@
 namespace gorilla::glfw
 {
 
-class window {
+class window
+{
 public:
     window(
 			std::string name,
@@ -36,6 +37,8 @@ public:
     static void poll_events();
 
     static std::vector<const char *> extensions();
+
+	static bool present_supported(const vk::raii::Instance& instance, const vk::raii::PhysicalDevice& phys_device, uint32_t queue_family_index);
 
     inline std::string name() const
     {

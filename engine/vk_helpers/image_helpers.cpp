@@ -1,14 +1,10 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
 #include <iostream>
 #include "image_helpers.hpp"
 #include "buffer_helpers.hpp"
 #include "command_helpers.hpp"
 
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 std::pair<vk::raii::Image, vk::raii::DeviceMemory> image(

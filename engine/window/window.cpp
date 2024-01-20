@@ -16,7 +16,7 @@ window::window(
   _height(h)
 {
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	//glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	_handle = glfwCreateWindow(_width, _height, _name.c_str(), nullptr, nullptr);
 	if (_handle == nullptr)
 	{
@@ -110,6 +110,11 @@ std::vector<const char *> window::extensions()
     }
 
     return res;
+}
+
+bool window::present_supported(const vk::raii::Instance& instance, const vk::raii::PhysicalDevice& phys_device, uint32_t queue_family_index)
+{
+	return glfwGetPhysicalDevicePresentationSupport(*instance, *phys_device, queue_family_index);
 }
 
 } // gorilla

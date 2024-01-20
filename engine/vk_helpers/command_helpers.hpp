@@ -1,14 +1,9 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
-#ifndef DEEPLOM_COMMAND_HELPERS_HPP
-#define DEEPLOM_COMMAND_HELPERS_HPP
+#pragma once
 
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_utils/environment.hpp>
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 vk::raii::CommandBuffer single_time_command(
@@ -20,5 +15,3 @@ void end_command(
 		const vk::raii::CommandBuffer& cmd);
 
 }
-
-#endif //DEEPLOM_COMMAND_HELPERS_HPP

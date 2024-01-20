@@ -10,14 +10,14 @@
 namespace gorilla::asset_loader
 {
 
-geom::obj load_mesh(const std::string& filename)
+asset::obj load_mesh(const std::string& filename)
 {
-	return geom::obj::load_obj(filename);
+	return asset::obj::load_obj(filename);
 }
 
-std::vector<geom::obj> load_meshes(const std::vector<std::string>& filenames)
+std::vector<asset::obj> load_meshes(const std::vector<std::string>& filenames)
 {
-	std::vector<geom::obj> meshes;
+	std::vector<asset::obj> meshes;
 	for (const std::string& filename : filenames)
 		meshes.emplace_back(load_mesh(filename));
 
@@ -26,7 +26,7 @@ std::vector<geom::obj> load_meshes(const std::vector<std::string>& filenames)
 
 asset::image load_image(const std::string& filename)
 {
-	return asset::image::load_image(filename);
+	return *asset::image::load_image(filename);
 }
 
 std::vector<asset::image> load_images(const std::vector<std::string>& filenames)

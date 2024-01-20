@@ -9,8 +9,9 @@
 
 #include "glm/glm.hpp"
 
+#include "detail/obj_detail.h"
 
-namespace gorilla::geom
+namespace gorilla::asset
 {
 
 bool operator==(const obj::index_triplet& l, const obj::index_triplet& r) noexcept
@@ -77,163 +78,12 @@ obj obj::load_obj(const std::string& filename)
 	std::optional<bool> has_texcoords = std::nullopt;
 	std::optional<bool> has_normals = std::nullopt;
 
-	int line_number = 0;
-	const auto read_v = [&vertices, line_number] (std::stringstream& ss)
-	{
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in vertex position description (0/3) at line "s + std::to_string(line_number) + ".");
-		float x = 0.0f;
-		ss >> x;
-
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in vertex position description (1/3) at line "s + std::to_string(line_number) + ".");
-		float y = 0.0f;
-		ss >> y;
-
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in vertex position description (2/3) at line "s + std::to_string(line_number) + ".");
-		float z = 0.0f;
-		ss >> z;
-
-		float w = 1.0f;
-		if (!ss.eof())
-		{
-			ss >> w;
-			if (!ss.eof())
-				throw std::runtime_error("Too many components in vertex position description (max is 4) at line "s + std::to_string(line_number) + ".");
-		}
-
-		vertices.v.emplace_back(x, y, z, w);
-	};
-
-	const auto read_vt = [&vertices, line_number] (std::stringstream& ss)
-	{
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in texcoord description (0/2) at line "s + std::to_string(line_number) + ".");
-		float u = 0.0f;
-		ss >> u;
-
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in texcoord description (1/2) at line "s + std::to_string(line_number) + ".");
-		float v = 0.0f;
-		ss >> v;
-
-		float w = 0.0f;
-		if (!ss.eof())
-		{
-			ss >> w;
-
-			if (!ss.eof())
-				throw std::runtime_error("Too many components in texcoord description (max is 3) at line "s + std::to_string(line_number) + ".");
-		}
-
-		vertices.vt.emplace_back(u, v, w);
-	};
-
-	const auto read_vn = [&vertices, line_number] (std::stringstream& ss)
-	{
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in normal description (0/3) at line "s + std::to_string(line_number) + ".");
-		float x = 0.0f;
-		ss >> x;
-
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in normal description (1/3) at line "s + std::to_string(line_number) + ".");
-		float y = 0.0f;
-		ss >> y;
-
-		if (ss.eof())
-			throw std::runtime_error("Not enough components in normal description (2/3) at line "s + std::to_string(line_number) + ".");
-		float z = 0.0f;
-		ss >> z;
-
-		if (!ss.eof())
-			throw std::runtime_error("Too many components in normal description (max is 3) at line "s + std::to_string(line_number) + ".");
-
-		vertices.vn.emplace_back(x, y, z);
-	};
-
-	const auto read_f = [&vertices, &faces, &has_texcoords, &has_normals, line_number] (std::stringstream& ss)
-	{
-		obj::index_triplet triplet;
-
-		std::string snippet;
-		uint32_t cnt = 0;
-		while (!ss.eof())
-		{
-			++cnt;
-			ss >> snippet;
-			std::stringstream sss(snippet);
-			char delim;
-			sss >> triplet.vi;
-			if (triplet.vi < 0)
-				triplet.vi += vertices.v.size();
-			else
-				triplet.vi -= 1;
-			if (!sss.eof())
-			{
-				sss >> delim;
-				if (sss.eof())
-					throw std::runtime_error("Missing texcoord/normal index after \"/\" at line "s + std::to_string(line_number) + ".");
-
-				sss >> delim;
-				if (delim != '/')
-				{
-					sss.unget();
-					sss >> triplet.vti;
-					if (triplet.vti < 0)
-						triplet.vti += vertices.vt.size();
-					else
-						triplet.vti -= 1;
-					if (sss.eof())
-						goto assignment;
-
-					sss >> delim;
-				}
-				if (sss.eof())
-					throw std::runtime_error("Missing normal index after \"/\" at line "s + std::to_string(line_number) + ".");
-
-				sss >> triplet.vni;
-				if (triplet.vni < 0)
-					triplet.vni += vertices.vn.size();
-				else
-					triplet.vni -= 1;
-
-				if (!sss.eof())
-					throw std::runtime_error("Too many indices specified (max is 3) at line"s + std::to_string(line_number) + ".");
-			}
-assignment:
-			if (!has_texcoords.has_value())
-			{
-				has_texcoords = triplet.vti != -1;
-			}
-			else if (has_texcoords.value() != (triplet.vti != -1))
-				throw std::runtime_error("Mismatch of texcoord indices: if one vertex has texcoord, all of them must have it. At line "s + std::to_string(line_number) + ".");
-
-			if (!has_normals.has_value())
-			{
-				has_normals = triplet.vni != -1;
-			}
-			else if (has_normals.value() != (triplet.vni != -1))
-				throw std::runtime_error("Mismatch of normal indices: if one vertex has normal, all of them must have it. At line "s + std::to_string(line_number) + ".");
-
-			faces.face_indices.push_back(triplet);
-
-			ss >> std::ws;
-		}
-		if (cnt < 3)
-			throw std::runtime_error("Not enough index descriptions in a face (min is 3) at line "s + std::to_string(line_number) + ".");
-
-		if (faces.face_offsets.empty())
-			faces.face_offsets.push_back(0);
-		faces.face_offsets.push_back(faces.face_offsets.back() + cnt);
-	};
-
 
 	std::ifstream fs(filename, std::ios::in);
 	if (!fs.is_open())
 		throw std::runtime_error(std::string("Couldn't open file: \"") + filename + "\".");
 
+	int line_number = 0;
 	while(!fs.eof())
 	{
 		++line_number;
@@ -261,13 +111,43 @@ assignment:
 			continue;
 
 		if (descriptor == "v")
-			read_v(ss);
+		{
+			vertices.v.push_back(detail::parse_vertex(ss));
+		}
 		else if (descriptor == "vt")
-			read_vt(ss);
+		{
+			vertices.vt.push_back(detail::parse_tex_coord(ss));
+		}
 		else if (descriptor == "vn")
-			read_vn(ss);
+		{
+			vertices.vn.push_back(detail::parse_normal(ss));
+		}
 		else if (descriptor == "f")
-			read_f(ss);
+		{
+			const std::vector<std::array<int, 3>> triplets = gorilla::asset::detail::parse_face(ss);
+			if (faces.face_offsets.empty())
+				faces.face_offsets.push_back(0);
+			faces.face_offsets.push_back(faces.face_offsets.back() + triplets.size());
+
+			for (const std::array<int, 3>& triplet : triplets)
+			{
+				index_triplet index_triplet;
+				index_triplet.vi = triplet[0];
+				index_triplet.vti = triplet[1];
+				index_triplet.vni = triplet[2];
+				faces.face_indices.push_back(index_triplet);
+
+				if (!has_texcoords.has_value())
+					has_texcoords = index_triplet.vti != -1;
+				else if (has_texcoords.value() != (index_triplet.vti != -1))
+					throw std::runtime_error("Texture coordinates are not specified for all vertices");
+
+				if (!has_normals.has_value())
+					has_normals = index_triplet.vni != -1;
+				else if (has_normals.value() != (index_triplet.vni != -1))
+					throw std::runtime_error("Normals are not specified for all vertices");
+			}
+		}
 		else
 			throw std::runtime_error(std::string("Unknown token \"") + descriptor + "\" at line " + std::to_string(line_number) + ".");
 	}

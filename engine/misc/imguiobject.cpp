@@ -15,7 +15,6 @@ imgui_object::imgui_object(GLFWwindow* window, bool install_callbacks, ImGui_Imp
 : _initialized(true)
 {
 	ImGui::CreateContext();
-//	ImGuiIO& io = ImGui::GetIO();
 	ImGui_ImplGlfw_InitForVulkan(window, install_callbacks);
 	ImGui_ImplVulkan_Init(info, renderpass);
 }
@@ -28,6 +27,7 @@ imgui_object::~imgui_object() noexcept
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
 	}
+	_initialized = false;
 }
 
 } // gorilla::engine::misc

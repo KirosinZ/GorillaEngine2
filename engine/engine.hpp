@@ -1,28 +1,21 @@
-#ifndef DEEPLOM_ENGINE_HPP
-#define DEEPLOM_ENGINE_HPP
+#pragma once
 
-#define GLFW_INCLUDE_VULKAN
-#include <window/window.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <stb/stb_image.h>
-
-#include <chrono>
+#include <window/window.hpp>
 
 namespace gorilla
 {
-    struct Engine
+    class Engine
     {
-        inline static const std::string Name = "Gorilla Engine";
-        static const int Version = VK_MAKE_API_VERSION(1, 0, 1, 0);
-        static const int VulkanVersion = VK_API_VERSION_1_3;
+    public:
+        static constexpr std::string Name = "Gorilla Engine";
+        static constexpr uint32_t Version = VK_MAKE_VERSION(1, 0, 0);
+        static constexpr uint32_t VulkanVersion = VK_API_VERSION_1_3;
     };
 
 } // gorilla
-
-#endif //DEEPLOM_ENGINE_HPP

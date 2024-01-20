@@ -1,14 +1,9 @@
-//
-// Created by Kiril on 29.04.2023.
-//
-
-#ifndef DEEPLOM_BUFFER_HELPERS_HPP
-#define DEEPLOM_BUFFER_HELPERS_HPP
+#pragma once
 
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_utils/environment.hpp>
 
-namespace vk_helpers
+namespace gorilla::vk_helpers
 {
 
 std::pair<vk::raii::Buffer, vk::raii::DeviceMemory> buffer(
@@ -42,5 +37,3 @@ uint32_t memory_type(
 		vk::MemoryPropertyFlags mem_properties);
 
 }
-
-#endif //DEEPLOM_BUFFER_HELPERS_HPP
